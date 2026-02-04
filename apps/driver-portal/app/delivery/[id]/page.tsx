@@ -32,6 +32,7 @@ export default function DeliveryDetailPage() {
   const [updating, setUpdating] = useState(false);
   const [showPODSheet, setShowPODSheet] = useState(false);
   const [showTempSheet, setShowTempSheet] = useState(false);
+  const [showNavSheet, setShowNavSheet] = useState(false);
 
   const supabase = createClient();
 
@@ -119,17 +120,60 @@ export default function DeliveryDetailPage() {
     return statusFlow[delivery.status];
   };
 
-  const openNavigation = () => {
-    if (!delivery) return;
+  const getNavigationAddress = () => {
+    if (!delivery) return '';
 
     const isPickupPhase = ['assigned', 'en_route_pickup', 'arrived_pickup'].includes(delivery.status);
-    const address = isPickupPhase
+    return isPickupPhase
       ? `${delivery.pickup_address}, ${delivery.pickup_city}, ${delivery.pickup_state} ${delivery.pickup_zip}`
       : `${delivery.delivery_address}, ${delivery.delivery_city}, ${delivery.delivery_state} ${delivery.delivery_zip}`;
+  };
 
-    // Try Google Maps first, then Apple Maps
-    const googleMapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
-    window.open(googleMapsUrl, '_blank');
+  const getNavigationCoords = () => {
+    if (!delivery) return null;
+
+    const isPickupPhase = ['assigned', 'en_route_pickup', 'arrived_pickup'].includes(delivery.status);
+    const lat = isPickupPhase ? delivery.pickup_lat : delivery.delivery_lat;
+    const lng = isPickupPhase ? delivery.pickup_lng : delivery.delivery_lng;
+
+    if (lat && lng) return { lat, lng };
+    return null;
+  };
+
+  const openNavigation = (app: 'google' | 'apple' | 'waze') => {
+    const address = getNavigationAddress();
+    const coords = getNavigationCoords();
+
+    let url = '';
+
+    switch (app) {
+      case 'google':
+        if (coords) {
+          url = `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}`;
+        } else {
+          url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
+        }
+        break;
+
+      case 'apple':
+        if (coords) {
+          url = `https://maps.apple.com/?daddr=${coords.lat},${coords.lng}`;
+        } else {
+          url = `https://maps.apple.com/?daddr=${encodeURIComponent(address)}`;
+        }
+        break;
+
+      case 'waze':
+        if (coords) {
+          url = `https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`;
+        } else {
+          url = `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`;
+        }
+        break;
+    }
+
+    window.open(url, '_blank');
+    setShowNavSheet(false);
   };
 
   if (loading) {
@@ -189,7 +233,7 @@ export default function DeliveryDetailPage() {
           <p className="text-gray-500">Map View</p>
         </div>
         <button
-          onClick={openNavigation}
+          onClick={() => setShowNavSheet(true)}
           className="absolute bottom-4 right-4 bg-epyc-primary text-white px-4 py-2 rounded-lg flex items-center shadow-lg"
         >
           <Navigation className="h-5 w-5 mr-2" />
@@ -349,6 +393,14 @@ export default function DeliveryDetailPage() {
           minTemp={delivery.temperature_min || 2}
           maxTemp={delivery.temperature_max || 8}
           onClose={() => setShowTempSheet(false)}
+        />
+      )}
+
+      {/* Navigation App Selector */}
+      {showNavSheet && (
+        <NavigationSheet
+          onSelect={openNavigation}
+          onClose={() => setShowNavSheet(false)}
         />
       )}
     </div>
@@ -644,6 +696,96 @@ function TemperatureSheet({
           >
             {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Log Temperature'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NavigationSheet({
+  onSelect,
+  onClose,
+}: {
+  onSelect: (app: 'google' | 'apple' | 'waze') => void;
+  onClose: () => void;
+}) {
+  const navApps = [
+    {
+      id: 'google' as const,
+      name: 'Google Maps',
+      icon: (
+        <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#4285F4"/>
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 1.74.5 3.37 1.41 4.84.28-.59.65-1.2 1.09-1.84L12 2z" fill="#34A853"/>
+          <path d="M5 9c0-1.74.5-3.37 1.41-4.84.28.59.65 1.2 1.09 1.84L12 22s1.3-1.44 2.78-3.51L5 9z" fill="#FBBC05"/>
+          <path d="M12 22s1.3-1.44 2.78-3.51c1.12-1.56 2.28-3.39 3.11-5.15.55-1.17.92-2.34 1.05-3.34H12l4.59 8.49L12 22z" fill="#EA4335"/>
+          <circle cx="12" cy="9" r="2.5" fill="white"/>
+        </svg>
+      ),
+      color: 'bg-white border-2 border-gray-200',
+    },
+    {
+      id: 'apple' as const,
+      name: 'Apple Maps',
+      icon: (
+        <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none">
+          <rect width="24" height="24" rx="6" fill="#000"/>
+          <path d="M12 5c-2.76 0-5 2.24-5 5 0 4.5 5 9 5 9s5-4.5 5-9c0-2.76-2.24-5-5-5z" fill="#fff"/>
+          <circle cx="12" cy="10" r="2" fill="#000"/>
+        </svg>
+      ),
+      color: 'bg-white border-2 border-gray-200',
+    },
+    {
+      id: 'waze' as const,
+      name: 'Waze',
+      icon: (
+        <svg className="h-8 w-8" viewBox="0 0 24 24" fill="none">
+          <rect width="24" height="24" rx="6" fill="#33CCFF"/>
+          <ellipse cx="12" cy="11" rx="7" ry="6" fill="white"/>
+          <circle cx="9" cy="10" r="1.5" fill="#33CCFF"/>
+          <circle cx="15" cy="10" r="1.5" fill="#33CCFF"/>
+          <path d="M9 13.5c0 0 1.5 2 3 2s3-2 3-2" stroke="#33CCFF" strokeWidth="1.5" strokeLinecap="round"/>
+          <path d="M17.5 14.5c1 1 2.5 1.5 3.5 0.5" stroke="white" strokeWidth="2" strokeLinecap="round"/>
+        </svg>
+      ),
+      color: 'bg-white border-2 border-gray-200',
+    },
+  ];
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50" onClick={onClose}>
+      <div
+        className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl slide-up safe-area-bottom"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold">Choose Navigation App</h3>
+            <button onClick={onClose} className="p-2">
+              <X className="h-6 w-6 text-gray-400" />
+            </button>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-3">
+          {navApps.map((app) => (
+            <button
+              key={app.id}
+              onClick={() => onSelect(app.id)}
+              className={`w-full flex items-center gap-4 p-4 rounded-xl ${app.color} hover:bg-gray-50 transition-colors touch-target`}
+            >
+              {app.icon}
+              <span className="font-medium text-gray-900">{app.name}</span>
+              <Navigation className="h-5 w-5 text-gray-400 ml-auto" />
+            </button>
+          ))}
+        </div>
+
+        <div className="px-4 pb-4">
+          <p className="text-xs text-center text-gray-500">
+            Tap to open directions in your preferred app
+          </p>
         </div>
       </div>
     </div>

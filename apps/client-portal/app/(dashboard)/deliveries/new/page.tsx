@@ -12,8 +12,11 @@ import {
   ArrowRight,
   Loader2,
   CheckCircle,
+  CreditCard,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { AddressAutocomplete } from '@/components/ui/AddressAutocomplete';
+import { PaymentStep } from '@/components/booking/PaymentStep';
 import {
   SERVICE_LEVEL_CONFIG,
   VEHICLE_CONFIG,
@@ -23,13 +26,31 @@ import {
 } from '@epyc/shared';
 import type { ServiceLevel, VehicleType, QuoteRequest } from '@epyc/shared';
 
-type Step = 'pickup' | 'delivery' | 'package' | 'quote' | 'confirm';
+type Step = 'pickup' | 'delivery' | 'package' | 'quote' | 'payment' | 'confirm';
+
+interface Coordinates {
+  lat: number;
+  lng: number;
+}
 
 export default function NewDeliveryPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>('pickup');
   const [loading, setLoading] = useState(false);
+  const [calculatingDistance, setCalculatingDistance] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Coordinates for distance calculation
+  const [pickupCoords, setPickupCoords] = useState<Coordinates | null>(null);
+  const [deliveryCoords, setDeliveryCoords] = useState<Coordinates | null>(null);
+  const [distanceData, setDistanceData] = useState<{
+    distance_miles: number;
+    duration_minutes: number;
+  } | null>(null);
+
+  // Delivery booking state
+  const [deliveryId, setDeliveryId] = useState<string | null>(null);
+  const [trackingNumber, setTrackingNumber] = useState<string | null>(null);
 
   // Form data
   const [formData, setFormData] = useState({
@@ -88,9 +109,93 @@ export default function NewDeliveryPage() {
     }));
   };
 
-  const calculateDeliveryQuote = () => {
-    // Mock distance for now (would use Google Maps API)
-    const mockDistance = 15; // miles
+  const handlePickupAddressSelect = (data: {
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    lat: number;
+    lng: number;
+  }) => {
+    setFormData((prev) => ({
+      ...prev,
+      pickup_address: data.address,
+      pickup_city: data.city,
+      pickup_state: data.state,
+      pickup_zip: data.zip,
+    }));
+    setPickupCoords({ lat: data.lat, lng: data.lng });
+  };
+
+  const handleDeliveryAddressSelect = (data: {
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    lat: number;
+    lng: number;
+  }) => {
+    setFormData((prev) => ({
+      ...prev,
+      delivery_address: data.address,
+      delivery_city: data.city,
+      delivery_state: data.state,
+      delivery_zip: data.zip,
+    }));
+    setDeliveryCoords({ lat: data.lat, lng: data.lng });
+  };
+
+  const calculateDistance = async (): Promise<number> => {
+    if (!pickupCoords || !deliveryCoords) {
+      // Fallback to mock distance if coordinates aren't available
+      return 15;
+    }
+
+    setCalculatingDistance(true);
+
+    try {
+      const response = await fetch('/api/distance', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          origin: pickupCoords,
+          destination: deliveryCoords,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to calculate distance');
+      }
+
+      const data = await response.json();
+      setDistanceData({
+        distance_miles: data.distance_miles,
+        duration_minutes: data.duration_minutes,
+      });
+      return data.distance_miles;
+    } catch (err) {
+      console.error('Distance calculation error:', err);
+      // Fallback to mock distance
+      return 15;
+    } finally {
+      setCalculatingDistance(false);
+    }
+  };
+
+  const calculateDeliveryQuote = async () => {
+    setError(null);
+
+    // Validate required fields
+    if (!formData.pickup_address || !formData.pickup_city || !formData.pickup_zip) {
+      setError('Please complete the pickup address');
+      return;
+    }
+    if (!formData.delivery_address || !formData.delivery_city || !formData.delivery_zip) {
+      setError('Please complete the delivery address');
+      return;
+    }
+
+    const distance = await calculateDistance();
 
     const quoteRequest: QuoteRequest = {
       pickup_address: formData.pickup_address,
@@ -114,12 +219,13 @@ export default function NewDeliveryPage() {
       temperature_max: formData.temperature_max,
     };
 
-    const result = calculateQuote(quoteRequest, mockDistance);
+    const result = calculateQuote(quoteRequest, distance);
     setQuote(result);
     setStep('quote');
   };
 
-  const handleSubmit = async () => {
+  // Create delivery and proceed to payment
+  const handleProceedToPayment = async () => {
     if (!quote) return;
 
     setLoading(true);
@@ -134,64 +240,90 @@ export default function NewDeliveryPage() {
       return;
     }
 
-    const trackingNumber = generateTrackingNumber();
+    const newTrackingNumber = generateTrackingNumber();
 
-    const { error: insertError } = await supabase.from('deliveries').insert({
-      tracking_number: trackingNumber,
-      customer_id: user.id,
-      status: 'booked',
-      // Pickup
-      pickup_address: formData.pickup_address,
-      pickup_city: formData.pickup_city,
-      pickup_state: formData.pickup_state,
-      pickup_zip: formData.pickup_zip,
-      pickup_contact_name: formData.pickup_contact_name,
-      pickup_contact_phone: formData.pickup_contact_phone,
-      pickup_instructions: formData.pickup_instructions,
-      // Delivery
-      delivery_address: formData.delivery_address,
-      delivery_city: formData.delivery_city,
-      delivery_state: formData.delivery_state,
-      delivery_zip: formData.delivery_zip,
-      delivery_contact_name: formData.delivery_contact_name,
-      delivery_contact_phone: formData.delivery_contact_phone,
-      delivery_instructions: formData.delivery_instructions,
-      // Package
-      package_description: formData.package_description,
-      package_weight: formData.package_weight,
-      package_length: formData.package_length,
-      package_width: formData.package_width,
-      package_height: formData.package_height,
-      requires_signature: formData.requires_signature,
-      is_fragile: formData.is_fragile,
-      is_medical: formData.is_medical,
-      is_hipaa: formData.is_hipaa,
-      requires_temperature_control: formData.requires_temperature_control,
-      temperature_min: formData.requires_temperature_control ? formData.temperature_min : null,
-      temperature_max: formData.requires_temperature_control ? formData.temperature_max : null,
-      // Pricing
-      distance_miles: quote.distance_miles,
-      estimated_duration_minutes: quote.estimated_duration_minutes,
-      base_price: quote.base_price,
-      distance_price: quote.distance_price,
-      weight_surcharge: quote.weight_surcharge,
-      rush_surcharge: quote.rush_surcharge,
-      hipaa_surcharge: quote.hipaa_surcharge,
-      temperature_surcharge: quote.temperature_surcharge,
-      total_price: quote.total_price,
-      driver_payout: quote.driver_payout,
-      // Service
-      service_level: formData.service_level,
-      vehicle_required: quote.vehicle_required,
-      booked_at: new Date().toISOString(),
-    });
+    const { data: insertedDelivery, error: insertError } = await supabase
+      .from('deliveries')
+      .insert({
+        tracking_number: newTrackingNumber,
+        customer_id: user.id,
+        status: 'booked',
+        payment_status: 'pending',
+        // Pickup
+        pickup_address: formData.pickup_address,
+        pickup_city: formData.pickup_city,
+        pickup_state: formData.pickup_state,
+        pickup_zip: formData.pickup_zip,
+        pickup_lat: pickupCoords?.lat,
+        pickup_lng: pickupCoords?.lng,
+        pickup_contact_name: formData.pickup_contact_name,
+        pickup_contact_phone: formData.pickup_contact_phone,
+        pickup_instructions: formData.pickup_instructions,
+        // Delivery
+        delivery_address: formData.delivery_address,
+        delivery_city: formData.delivery_city,
+        delivery_state: formData.delivery_state,
+        delivery_zip: formData.delivery_zip,
+        delivery_lat: deliveryCoords?.lat,
+        delivery_lng: deliveryCoords?.lng,
+        delivery_contact_name: formData.delivery_contact_name,
+        delivery_contact_phone: formData.delivery_contact_phone,
+        delivery_instructions: formData.delivery_instructions,
+        // Package
+        package_description: formData.package_description,
+        package_weight: formData.package_weight,
+        package_length: formData.package_length,
+        package_width: formData.package_width,
+        package_height: formData.package_height,
+        requires_signature: formData.requires_signature,
+        is_fragile: formData.is_fragile,
+        is_medical: formData.is_medical,
+        is_hipaa: formData.is_hipaa,
+        requires_temperature_control: formData.requires_temperature_control,
+        temperature_min: formData.requires_temperature_control ? formData.temperature_min : null,
+        temperature_max: formData.requires_temperature_control ? formData.temperature_max : null,
+        // Pricing
+        distance_miles: quote.distance_miles,
+        estimated_duration_minutes: quote.estimated_duration_minutes,
+        base_price: quote.base_price,
+        distance_price: quote.distance_price,
+        weight_surcharge: quote.weight_surcharge,
+        rush_surcharge: quote.rush_surcharge,
+        hipaa_surcharge: quote.hipaa_surcharge,
+        temperature_surcharge: quote.temperature_surcharge,
+        total_price: quote.total_price,
+        driver_payout: quote.driver_payout,
+        // Service
+        service_level: formData.service_level,
+        vehicle_required: quote.vehicle_required,
+        booked_at: new Date().toISOString(),
+      })
+      .select('id')
+      .single();
 
-    if (insertError) {
-      setError(insertError.message);
+    if (insertError || !insertedDelivery) {
+      setError(insertError?.message || 'Failed to create delivery');
       setLoading(false);
       return;
     }
 
+    // Store delivery info and proceed to payment
+    setDeliveryId(insertedDelivery.id);
+    setTrackingNumber(newTrackingNumber);
+    setLoading(false);
+    setStep('payment');
+  };
+
+  // Handle payment success - move to confirmation
+  const handlePaymentSuccess = () => {
+    setStep('confirm');
+    setTimeout(() => {
+      router.push('/deliveries');
+    }, 3000);
+  };
+
+  // Skip payment (for testing or pay-later scenarios)
+  const handleSkipPayment = async () => {
     setStep('confirm');
     setTimeout(() => {
       router.push('/deliveries');
@@ -203,6 +335,7 @@ export default function NewDeliveryPage() {
     { id: 'delivery', label: 'Delivery' },
     { id: 'package', label: 'Package' },
     { id: 'quote', label: 'Quote' },
+    { id: 'payment', label: 'Payment' },
   ];
 
   return (
@@ -251,20 +384,15 @@ export default function NewDeliveryPage() {
               <h2 className="text-lg font-semibold">Pickup Location</h2>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Street Address
-              </label>
-              <input
-                type="text"
-                name="pickup_address"
-                value={formData.pickup_address}
-                onChange={handleChange}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-epyc-primary focus:border-epyc-primary"
-                placeholder="123 Main Street"
-              />
-            </div>
+            <AddressAutocomplete
+              id="pickup_address"
+              label="Street Address"
+              placeholder="Start typing an address..."
+              value={formData.pickup_address}
+              onChange={(value) => setFormData((prev) => ({ ...prev, pickup_address: value }))}
+              onAddressSelect={handlePickupAddressSelect}
+              required
+            />
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="col-span-2">
@@ -351,7 +479,7 @@ export default function NewDeliveryPage() {
               <button
                 type="button"
                 onClick={() => setStep('delivery')}
-                className="flex items-center px-6 py-2 bg-epyc-primary text-white rounded-lg hover:bg-blue-700"
+                className="flex items-center px-6 py-2 bg-epyc-primary text-white rounded-lg hover:bg-emerald-700 transition-colors"
               >
                 Next
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -368,20 +496,15 @@ export default function NewDeliveryPage() {
               <h2 className="text-lg font-semibold">Delivery Location</h2>
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Street Address
-              </label>
-              <input
-                type="text"
-                name="delivery_address"
-                value={formData.delivery_address}
-                onChange={handleChange}
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-epyc-primary focus:border-epyc-primary"
-                placeholder="456 Oak Avenue"
-              />
-            </div>
+            <AddressAutocomplete
+              id="delivery_address"
+              label="Street Address"
+              placeholder="Start typing an address..."
+              value={formData.delivery_address}
+              onChange={(value) => setFormData((prev) => ({ ...prev, delivery_address: value }))}
+              onAddressSelect={handleDeliveryAddressSelect}
+              required
+            />
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div className="col-span-2">
@@ -468,14 +591,14 @@ export default function NewDeliveryPage() {
               <button
                 type="button"
                 onClick={() => setStep('pickup')}
-                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Back
               </button>
               <button
                 type="button"
                 onClick={() => setStep('package')}
-                className="flex items-center px-6 py-2 bg-epyc-primary text-white rounded-lg hover:bg-blue-700"
+                className="flex items-center px-6 py-2 bg-epyc-primary text-white rounded-lg hover:bg-emerald-700 transition-colors"
               >
                 Next
                 <ArrowRight className="ml-2 h-4 w-4" />
@@ -568,7 +691,7 @@ export default function NewDeliveryPage() {
                     key={key}
                     className={`flex items-center p-4 border rounded-lg cursor-pointer transition-colors ${
                       formData.service_level === key
-                        ? 'border-epyc-primary bg-blue-50'
+                        ? 'border-epyc-primary bg-emerald-50'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
@@ -599,7 +722,7 @@ export default function NewDeliveryPage() {
                     key={key}
                     className={`flex flex-col items-center p-4 border rounded-lg cursor-pointer transition-colors ${
                       formData.vehicle_required === key
-                        ? 'border-epyc-primary bg-blue-50'
+                        ? 'border-epyc-primary bg-emerald-50'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
@@ -713,17 +836,27 @@ export default function NewDeliveryPage() {
               <button
                 type="button"
                 onClick={() => setStep('delivery')}
-                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Back
               </button>
               <button
                 type="button"
                 onClick={calculateDeliveryQuote}
-                className="flex items-center px-6 py-2 bg-epyc-primary text-white rounded-lg hover:bg-blue-700"
+                disabled={calculatingDistance}
+                className="flex items-center px-6 py-2 bg-epyc-primary text-white rounded-lg hover:bg-emerald-700 transition-colors disabled:opacity-50"
               >
-                Get Quote
-                <ArrowRight className="ml-2 h-4 w-4" />
+                {calculatingDistance ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Calculating...
+                  </>
+                ) : (
+                  <>
+                    Get Quote
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </>
+                )}
               </button>
             </div>
           </div>
@@ -805,27 +938,39 @@ export default function NewDeliveryPage() {
               <button
                 type="button"
                 onClick={() => setStep('package')}
-                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
                 Back
               </button>
               <button
                 type="button"
-                onClick={handleSubmit}
+                onClick={handleProceedToPayment}
                 disabled={loading}
-                className="flex items-center px-6 py-2 bg-epyc-accent text-white rounded-lg hover:bg-emerald-600 disabled:opacity-50"
+                className="flex items-center px-6 py-2 bg-epyc-accent text-white rounded-lg hover:bg-emerald-600 transition-colors disabled:opacity-50"
               >
                 {loading ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <>
-                    Book Delivery
+                    <CreditCard className="h-4 w-4 mr-2" />
+                    Proceed to Payment
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </>
                 )}
               </button>
             </div>
           </div>
+        )}
+
+        {/* Payment Step */}
+        {step === 'payment' && deliveryId && quote && trackingNumber && (
+          <PaymentStep
+            deliveryId={deliveryId}
+            amount={quote.total_price}
+            trackingNumber={trackingNumber}
+            onSuccess={handlePaymentSuccess}
+            onBack={() => setStep('quote')}
+          />
         )}
 
         {/* Confirmation Step */}
