@@ -1,0 +1,33 @@
+{
+  "name": "epyc-portals",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:client": "turbo dev --filter=client-portal",
+    "dev:driver": "turbo dev --filter=driver-portal",
+    "dev:dispatch": "turbo dev --filter=dispatch",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "db:generate": "turbo db:generate --filter=@epyc/supabase",
+    "db:migrate": "turbo db:migrate --filter=@epyc/supabase",
+    "db:seed": "turbo db:seed --filter=@epyc/supabase",
+    "clean": "turbo clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "prettier": "^3.4.2",
+    "turbo": "^2.4.0",
+    "typescript": "^5.7.0"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
