@@ -1,0 +1,144 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --epyc-primary: #065F46;
+  --epyc-secondary: #047857;
+  --epyc-accent: #059669;
+  --epyc-green: #064E3B;
+  --epyc-teal: #0F766E;
+  --epyc-blue: #1E40AF;
+  --epyc-purple: #7C3AED;
+  --epyc-dark: #0F172A;
+  --epyc-light: #F8FAFC;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+/* Safe area padding for mobile */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Touch targets for mobile */
+.touch-target {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Animations */
+@keyframes slideUp {
+  from {
+    transform: translateY(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.slide-up {
+  animation: slideUp 0.3s ease-out forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out forwards;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Focus styles */
+*:focus-visible {
+  outline: 2px solid var(--epyc-primary);
+  outline-offset: 2px;
+}
+
+/* Button base styles */
+.btn {
+  @apply inline-flex items-center justify-center px-6 py-3 font-semibold rounded-lg transition-all duration-200;
+}
+
+.btn-primary {
+  @apply bg-epyc-primary text-white hover:bg-epyc-secondary;
+}
+
+.btn-secondary {
+  @apply bg-white text-epyc-primary border-2 border-epyc-primary hover:bg-epyc-light;
+}
+
+.btn-lg {
+  @apply px-8 py-4 text-lg;
+}
+
+/* Card styles */
+.card {
+  @apply bg-white rounded-xl shadow-sm border border-gray-100;
+}
+
+.card-hover {
+  @apply hover:shadow-md hover:border-gray-200 transition-all duration-200;
+}
+
+/* Dispatch Portal Styles */
+.status-badge {
+  @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize;
+}
+
+.data-table {
+  @apply w-full text-sm text-left;
+}
+
+.data-table th {
+  @apply px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider;
+}
+
+.data-table td {
+  @apply px-4 py-3 text-sm text-gray-700;
+}
+
+.map-container {
+  @apply w-full h-full rounded-lg overflow-hidden;
+}
+
+.live-indicator {
+  animation: pulse-live 2s ease-in-out infinite;
+}
+
+@keyframes pulse-live {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
