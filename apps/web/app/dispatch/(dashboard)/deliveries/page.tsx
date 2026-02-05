@@ -17,6 +17,7 @@ import {
   XCircle,
   Loader2,
   RefreshCw,
+  Link2,
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
 
@@ -39,6 +40,8 @@ interface Delivery {
   requires_signature: boolean;
   is_fragile: boolean;
   is_hipaa: boolean;
+  broker_name: string | null;
+  broker_type: string | null;
 }
 
 interface Driver {
@@ -93,6 +96,7 @@ export default function DeliveriesPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
   const [serviceFilter, setServiceFilter] = useState('all');
+  const [sourceFilter, setSourceFilter] = useState('all');
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
   const [assigning, setAssigning] = useState(false);
@@ -140,7 +144,8 @@ export default function DeliveriesPage() {
         is_fragile,
         is_hipaa,
         driver:drivers(profiles(full_name)),
-        customer:profiles!deliveries_customer_id_fkey(full_name)
+        customer:profiles!deliveries_customer_id_fkey(full_name),
+        broker_deliveries(broker:brokers(name, type))
       `)
       .order('created_at', { ascending: false })
       .limit(100);
@@ -176,6 +181,8 @@ export default function DeliveriesPage() {
           requires_signature: d.requires_signature,
           is_fragile: d.is_fragile,
           is_hipaa: d.is_hipaa,
+          broker_name: d.broker_deliveries?.[0]?.broker?.name || null,
+          broker_type: d.broker_deliveries?.[0]?.broker?.type || null,
         }))
       );
     }
@@ -252,6 +259,10 @@ export default function DeliveriesPage() {
   };
 
   const filteredDeliveries = deliveries.filter((delivery) => {
+    // Source filter
+    if (sourceFilter === 'broker' && !delivery.broker_name) return false;
+    if (sourceFilter === 'direct' && delivery.broker_name) return false;
+
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     return (
@@ -260,7 +271,8 @@ export default function DeliveriesPage() {
       delivery.delivery_address.toLowerCase().includes(query) ||
       delivery.pickup_contact_name?.toLowerCase().includes(query) ||
       delivery.delivery_contact_name?.toLowerCase().includes(query) ||
-      delivery.customer_name?.toLowerCase().includes(query)
+      delivery.customer_name?.toLowerCase().includes(query) ||
+      delivery.broker_name?.toLowerCase().includes(query)
     );
   });
 
@@ -344,6 +356,15 @@ export default function DeliveriesPage() {
                 </option>
               ))}
             </select>
+            <select
+              value={sourceFilter}
+              onChange={(e) => setSourceFilter(e.target.value)}
+              className="px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
+            >
+              <option value="all">All Sources</option>
+              <option value="direct">Direct</option>
+              <option value="broker">Broker</option>
+            </select>
           </div>
         </div>
       </div>
@@ -385,7 +406,13 @@ export default function DeliveriesPage() {
                         >
                           {delivery.tracking_number}
                         </Link>
-                        <div className="flex items-center gap-1 mt-1">
+                        <div className="flex items-center gap-1 mt-1 flex-wrap">
+                          {delivery.broker_name && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium bg-cyan-100 text-cyan-700 rounded">
+                              <Link2 className="h-2.5 w-2.5" />
+                              {delivery.broker_name}
+                            </span>
+                          )}
                           {delivery.is_hipaa && (
                             <span className="px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-700 rounded">
                               HIPAA

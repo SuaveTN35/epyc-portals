@@ -8,6 +8,11 @@ interface CookieToSet {
 }
 
 export async function middleware(request: NextRequest) {
+  // Skip session auth for broker API routes (uses API key auth)
+  if (request.nextUrl.pathname.startsWith('/api/broker')) {
+    return NextResponse.next();
+  }
+
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(

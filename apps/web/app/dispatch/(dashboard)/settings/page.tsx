@@ -14,7 +14,25 @@ import {
   Save,
   Loader2,
   CheckCircle,
+  Link2,
+  Plus,
+  Trash2,
+  ToggleLeft,
+  ToggleRight,
+  Copy,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
+
+interface BrokerConfig {
+  id: string;
+  name: string;
+  type: string;
+  is_active: boolean;
+  auto_accept: boolean;
+  callback_url: string;
+  created_at: string;
+}
 
 interface DispatchSettings {
   autoAssignment: boolean;
@@ -47,6 +65,8 @@ export default function SettingsPage() {
     phone: '',
     role: 'dispatcher',
   });
+  const [brokers, setBrokers] = useState<BrokerConfig[]>([]);
+  const [loadingBrokers, setLoadingBrokers] = useState(false);
   const [settings, setSettings] = useState<DispatchSettings>({
     autoAssignment: false,
     maxAssignmentRadius: 15,
@@ -62,6 +82,7 @@ export default function SettingsPage() {
 
   useEffect(() => {
     fetchSettings();
+    fetchBrokers();
   }, []);
 
   const fetchSettings = async () => {
@@ -117,11 +138,51 @@ export default function SettingsPage() {
     setTimeout(() => setSaved(false), 3000);
   };
 
+  const fetchBrokers = async () => {
+    setLoadingBrokers(true);
+    const supabase = createClient();
+
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('company_id')
+        .eq('id', user.id)
+        .single();
+
+      if (profile?.company_id) {
+        const { data } = await supabase
+          .from('brokers')
+          .select('id, name, type, is_active, auto_accept, callback_url, created_at')
+          .eq('company_id', profile.company_id)
+          .order('created_at', { ascending: false });
+
+        if (data) {
+          setBrokers(data);
+        }
+      }
+    }
+    setLoadingBrokers(false);
+  };
+
+  const handleToggleBroker = async (brokerId: string, isActive: boolean) => {
+    const supabase = createClient();
+    await supabase
+      .from('brokers')
+      .update({ is_active: !isActive })
+      .eq('id', brokerId);
+
+    setBrokers(brokers.map((b) =>
+      b.id === brokerId ? { ...b, is_active: !isActive } : b
+    ));
+  };
+
   const tabs = [
     { id: 'profile', label: 'Profile', icon: User },
     { id: 'notifications', label: 'Notifications', icon: Bell },
     { id: 'dispatch', label: 'Dispatch', icon: Truck },
     { id: 'pricing', label: 'Pricing', icon: DollarSign },
+    { id: 'brokers', label: 'Brokers', icon: Link2 },
   ];
 
   if (loading) {
@@ -510,6 +571,126 @@ export default function SettingsPage() {
                   )}
                   Save Pricing
                 </button>
+              </div>
+            </div>
+          )}
+
+          {/* Brokers tab */}
+          {activeTab === 'brokers' && (
+            <div className="space-y-6">
+              <div>
+                <div className="flex items-center justify-between mb-4">
+                  <div>
+                    <h3 className="text-lg font-medium text-gray-900">Broker Integrations</h3>
+                    <p className="text-sm text-gray-500">
+                      Manage connections with medical courier networks, logistics platforms, and B2B clients
+                    </p>
+                  </div>
+                </div>
+
+                {loadingBrokers ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-6 w-6 animate-spin text-epyc-primary" />
+                  </div>
+                ) : brokers.length === 0 ? (
+                  <div className="text-center py-12 bg-gray-50 rounded-lg border-2 border-dashed border-gray-200">
+                    <Link2 className="h-10 w-10 mx-auto text-gray-400 mb-3" />
+                    <p className="text-gray-600 font-medium">No broker integrations</p>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Broker connections are configured via the API or database.
+                    </p>
+                    <p className="text-xs text-gray-400 mt-2">
+                      Brokers POST delivery jobs to <code className="bg-gray-100 px-1.5 py-0.5 rounded">/api/broker/deliveries</code>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {brokers.map((broker) => (
+                      <div
+                        key={broker.id}
+                        className={`p-4 rounded-lg border ${
+                          broker.is_active
+                            ? 'bg-white border-gray-200'
+                            : 'bg-gray-50 border-gray-200 opacity-60'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${
+                              broker.type === 'medical'
+                                ? 'bg-red-100 text-red-600'
+                                : broker.type === 'logistics'
+                                ? 'bg-blue-100 text-blue-600'
+                                : 'bg-green-100 text-green-600'
+                            }`}>
+                              <Link2 className="h-5 w-5" />
+                            </div>
+                            <div>
+                              <p className="font-medium text-gray-900">{broker.name}</p>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className={`px-2 py-0.5 text-[10px] font-medium rounded-full ${
+                                  broker.type === 'medical'
+                                    ? 'bg-red-100 text-red-700'
+                                    : broker.type === 'logistics'
+                                    ? 'bg-blue-100 text-blue-700'
+                                    : 'bg-green-100 text-green-700'
+                                }`}>
+                                  {broker.type.replace('_', ' ').toUpperCase()}
+                                </span>
+                                {broker.auto_accept && (
+                                  <span className="px-2 py-0.5 text-[10px] font-medium bg-purple-100 text-purple-700 rounded-full">
+                                    Auto-Accept
+                                  </span>
+                                )}
+                                {broker.callback_url && (
+                                  <span className="px-2 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-600 rounded-full">
+                                    Callbacks
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`text-xs font-medium ${
+                              broker.is_active ? 'text-green-600' : 'text-gray-400'
+                            }`}>
+                              {broker.is_active ? 'Active' : 'Inactive'}
+                            </span>
+                            <button
+                              onClick={() => handleToggleBroker(broker.id, broker.is_active)}
+                              className="text-gray-400 hover:text-gray-600"
+                              title={broker.is_active ? 'Deactivate broker' : 'Activate broker'}
+                            >
+                              {broker.is_active ? (
+                                <ToggleRight className="h-6 w-6 text-green-500" />
+                              ) : (
+                                <ToggleLeft className="h-6 w-6" />
+                              )}
+                            </button>
+                          </div>
+                        </div>
+
+                        {broker.callback_url && (
+                          <div className="mt-3 pt-3 border-t border-gray-100">
+                            <p className="text-xs text-gray-500">
+                              Callback URL: <code className="bg-gray-100 px-1.5 py-0.5 rounded text-gray-700">{broker.callback_url}</code>
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div className="mt-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                  <h4 className="font-medium text-blue-900 mb-2">Broker API Endpoint</h4>
+                  <div className="text-sm text-blue-800 space-y-1">
+                    <p>POST <code className="bg-blue-100 px-1.5 py-0.5 rounded">/api/broker/deliveries</code> - Submit new delivery</p>
+                    <p>GET <code className="bg-blue-100 px-1.5 py-0.5 rounded">/api/broker/deliveries/:id</code> - Check delivery status</p>
+                    <p>POST <code className="bg-blue-100 px-1.5 py-0.5 rounded">/api/broker/deliveries/:id/cancel</code> - Cancel delivery</p>
+                    <p className="mt-2 text-xs text-blue-600">Authentication: Bearer token via API key</p>
+                  </div>
+                </div>
               </div>
             </div>
           )}

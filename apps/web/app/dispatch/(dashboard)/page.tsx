@@ -16,6 +16,7 @@ import {
   MapPin,
   Users,
   Loader2,
+  Link2,
 } from 'lucide-react';
 import { formatCurrency, formatDistance } from '@epyc/shared/utils';
 
@@ -26,6 +27,7 @@ interface DashboardStats {
   todayDeliveries: number;
   avgDeliveryTime: number;
   pendingAssignments: number;
+  brokerJobsToday: number;
 }
 
 interface RecentDelivery {
@@ -66,6 +68,7 @@ export default function DashboardPage() {
     todayDeliveries: 0,
     avgDeliveryTime: 0,
     pendingAssignments: 0,
+    brokerJobsToday: 0,
   });
   const [recentDeliveries, setRecentDeliveries] = useState<RecentDelivery[]>([]);
   const [driverStatuses, setDriverStatuses] = useState<DriverStatus[]>([]);
@@ -114,6 +117,12 @@ export default function DashboardPage() {
         .select('*', { count: 'exact', head: true })
         .eq('status', 'pending');
 
+      // Fetch broker jobs today
+      const { count: brokerJobsCount } = await supabase
+        .from('broker_deliveries')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', today.toISOString());
+
       // Fetch average delivery time for today
       const { data: completedToday } = await supabase
         .from('deliveries')
@@ -139,6 +148,7 @@ export default function DashboardPage() {
         todayDeliveries: todayDeliveriesCount || 0,
         avgDeliveryTime: avgTime,
         pendingAssignments: pendingCount || 0,
+        brokerJobsToday: brokerJobsCount || 0,
       });
 
       // Fetch recent deliveries
@@ -313,6 +323,14 @@ export default function DashboardPage() {
           color={stats.pendingAssignments > 0 ? 'red' : 'gray'}
           alert={stats.pendingAssignments > 0}
         />
+        {stats.brokerJobsToday > 0 && (
+          <StatCard
+            title="Broker Jobs Today"
+            value={stats.brokerJobsToday}
+            icon={Link2}
+            color="cyan"
+          />
+        )}
       </div>
 
       {/* Main content grid */}
@@ -474,6 +492,7 @@ function StatCard({
     orange: 'bg-orange-50 text-orange-600',
     red: 'bg-red-50 text-red-600',
     gray: 'bg-gray-50 text-gray-600',
+    cyan: 'bg-cyan-50 text-cyan-600',
   };
 
   return (

@@ -376,6 +376,57 @@ export interface Coordinates {
   lng: number;
 }
 
+// Broker Types
+export type BrokerType = 'medical' | 'logistics' | 'b2b_client';
+
+export interface Broker {
+  id: string;
+  company_id: string;
+  name: string;
+  type: BrokerType;
+  is_active: boolean;
+  auto_accept: boolean;
+  auto_accept_max_distance_miles?: number;
+  auto_accept_service_levels?: ServiceLevel[];
+  callback_url?: string;
+  callback_headers?: Record<string, string>;
+  callback_events: string[];
+  metadata?: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface BrokerDelivery {
+  id: string;
+  broker_id: string;
+  delivery_id: string;
+  broker_job_id: string;
+  broker_reference?: string;
+  raw_payload: Record<string, unknown>;
+  last_status_sent?: string;
+  last_callback_at?: string;
+  last_callback_status?: number;
+  callback_attempts: number;
+  callback_error?: string;
+  created_at: string;
+  // Joined fields
+  broker?: Broker;
+  delivery?: Delivery;
+}
+
+export interface BrokerWebhookLog {
+  id: string;
+  broker_id?: string;
+  direction: 'inbound' | 'outbound';
+  endpoint?: string;
+  request_body?: Record<string, unknown>;
+  response_status?: number;
+  response_body?: Record<string, unknown>;
+  processing_time_ms?: number;
+  error?: string;
+  created_at: string;
+}
+
 // Dashboard Stats Types
 export interface DashboardStats {
   total_deliveries: number;
