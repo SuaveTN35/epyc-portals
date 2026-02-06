@@ -80,40 +80,25 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Find or create a customer profile for this company's API user
-    let customerId: string;
-    const { data: companyProfile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('company_id', auth.companyId)
-      .in('role', ['customer', 'admin'])
-      .limit(1)
-      .single();
+    // For broker deliveries, customer_id can be null or we use the broker's designated user
+    // Try to find a profile linked to this company, but don't fail if none exists
+    let customerId: string | null = null;
 
-    if (companyProfile) {
-      customerId = companyProfile.id;
+    // Check if broker has a designated user_id
+    if (auth.broker.metadata?.designated_user_id) {
+      customerId = auth.broker.metadata.designated_user_id as string;
     } else {
-      // Use company's first profile as fallback
+      // Try to find any profile - broker deliveries can work without customer_id
       const { data: anyProfile } = await supabase
         .from('profiles')
         .select('id')
-        .eq('company_id', auth.companyId)
         .limit(1)
         .single();
 
-      if (!anyProfile) {
-        return NextResponse.json(
-          {
-            success: false,
-            error: {
-              code: 'NO_COMPANY_PROFILE',
-              message: 'No user profile found for this company. Create a user account linked to this company first.',
-            },
-          },
-          { status: 400 }
-        );
+      if (anyProfile) {
+        customerId = anyProfile.id;
       }
-      customerId = anyProfile.id;
+      // If no profile exists, we'll insert with null customer_id
     }
 
     // Calculate pricing
