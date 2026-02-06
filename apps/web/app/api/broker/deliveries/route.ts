@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { authenticateBroker, AuthError } from '@/lib/broker/auth';
 import { getAdapter } from '@/lib/broker/adapters';
 import { generateTrackingNumber, calculateQuote } from '@epyc/shared/utils';
+import { checkRateLimit, rateLimitHeaders, RATE_LIMITS } from '@/lib/rate-limit';
 import type { QuoteRequest } from '@epyc/shared/types';
 
 function getServiceSupabase() {
@@ -22,6 +23,25 @@ export async function POST(request: NextRequest) {
     // Authenticate
     const auth = await authenticateBroker(request);
     brokerId = auth.broker.id;
+
+    // Rate limit by API key
+    const rateLimitResult = checkRateLimit(
+      `broker:${auth.apiKeyId}`,
+      RATE_LIMITS.brokerApi
+    );
+
+    if (!rateLimitResult.success) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: {
+            code: 'RATE_LIMITED',
+            message: 'Too many requests. Please slow down.',
+          },
+        },
+        { status: 429, headers: rateLimitHeaders(rateLimitResult) }
+      );
+    }
 
     // Parse body
     const rawPayload = await request.json();

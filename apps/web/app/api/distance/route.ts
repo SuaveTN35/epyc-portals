@@ -1,15 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-
-interface DistanceRequest {
-  origin: {
-    lat: number;
-    lng: number;
-  };
-  destination: {
-    lat: number;
-    lng: number;
-  };
-}
+import { checkRateLimit, rateLimitHeaders, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { distanceRequestSchema, validateRequest } from '@/lib/validations';
 
 interface DistanceResponse {
   distance_miles: number;
@@ -19,21 +10,33 @@ interface DistanceResponse {
 }
 
 export async function POST(request: NextRequest) {
-  try {
-    const body: DistanceRequest = await request.json();
+  // Rate limit by IP
+  const clientId = getClientIdentifier(request);
+  const rateLimitResult = checkRateLimit(`distance:${clientId}`, RATE_LIMITS.api);
 
-    // Validate request body
-    if (
-      !body.origin?.lat ||
-      !body.origin?.lng ||
-      !body.destination?.lat ||
-      !body.destination?.lng
-    ) {
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitHeaders(rateLimitResult) }
+    );
+  }
+
+  try {
+    const rawBody = await request.json();
+
+    // Validate request body with Zod
+    const validation = validateRequest(distanceRequestSchema, rawBody);
+    if (!validation.success) {
       return NextResponse.json(
-        { error: 'Invalid request: origin and destination coordinates required' },
+        {
+          error: 'Invalid request',
+          details: validation.errors.map(e => ({ field: e.path.join('.'), message: e.message }))
+        },
         { status: 400 }
       );
     }
+
+    const body = validation.data;
 
     const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 

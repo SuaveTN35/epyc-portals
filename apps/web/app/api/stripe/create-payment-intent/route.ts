@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient } from '@/lib/supabase/server';
+import { checkRateLimit, rateLimitHeaders, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { createPaymentIntentSchema, validateRequest } from '@/lib/validations';
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
 
-interface CreatePaymentIntentRequest {
-  amount: number; // Amount in cents
-  delivery_id: string;
-  metadata?: Record<string, string>;
-}
-
 export async function POST(request: NextRequest) {
+  // Rate limit by IP
+  const clientId = getClientIdentifier(request);
+  const rateLimitResult = checkRateLimit(`payment:${clientId}`, RATE_LIMITS.api);
+
+  if (!rateLimitResult.success) {
+    return NextResponse.json(
+      { error: 'Too many requests. Please try again later.' },
+      { status: 429, headers: rateLimitHeaders(rateLimitResult) }
+    );
+  }
+
   try {
     const supabase = await createClient();
 
@@ -23,16 +30,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body: CreatePaymentIntentRequest = await request.json();
-    const { amount, delivery_id, metadata = {} } = body;
+    const rawBody = await request.json();
 
-    // Validate amount
-    if (!amount || amount < 100) {
+    // Validate with Zod
+    const validation = validateRequest(createPaymentIntentSchema, rawBody);
+    if (!validation.success) {
       return NextResponse.json(
-        { error: 'Invalid amount. Minimum is $1.00 (100 cents)' },
+        {
+          error: 'Invalid request',
+          details: validation.errors.map(e => ({ field: e.path.join('.'), message: e.message }))
+        },
         { status: 400 }
       );
     }
+
+    const { amount, delivery_id, metadata = {} } = validation.data;
 
     // Verify the delivery belongs to this user
     const { data: delivery, error: deliveryError } = await supabase
