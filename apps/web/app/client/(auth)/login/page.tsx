@@ -105,7 +105,7 @@ function LoginForm() {
           </div>
 
           <div className="text-sm">
-            <a href="#" className="font-medium text-epyc-primary hover:text-epyc-secondary">
+            <a href="mailto:admin@epyccs.com?subject=Password%20Reset%20Request%20-%20Client%20Portal" className="font-medium text-epyc-primary hover:text-epyc-secondary">
               Forgot password?
             </a>
           </div>

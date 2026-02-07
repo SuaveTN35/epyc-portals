@@ -198,10 +198,10 @@ export default async function ProfilePage() {
 
       {/* Menu Items */}
       <div className="bg-white rounded-xl shadow-sm">
-        <MenuItem icon={User} label="Edit Profile" href="#" />
-        <MenuItem icon={Car} label="Update Vehicle" href="#" />
-        <MenuItem icon={Bell} label="Notifications" href="#" />
-        <MenuItem icon={HelpCircle} label="Help & Support" href="#" />
+        <MenuItem icon={User} label="Edit Profile" href="mailto:admin@epyccs.com?subject=Profile%20Update%20Request" />
+        <MenuItem icon={Car} label="Update Vehicle" href="mailto:admin@epyccs.com?subject=Vehicle%20Update%20Request" />
+        <MenuItem icon={Bell} label="Notifications" href="/driver/jobs" />
+        <MenuItem icon={HelpCircle} label="Help & Support" href="/contact" />
         <MenuItem icon={LogOut} label="Sign Out" href="/api/auth/signout" isDestructive />
       </div>
     </div>
