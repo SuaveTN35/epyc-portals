@@ -427,6 +427,76 @@ export interface BrokerWebhookLog {
   created_at: string;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// MULTI-STOP TRIP & 1099 OWNER-OPERATOR MODEL
+// ═══════════════════════════════════════════════════════════════════
+
+export interface MultiStopQuoteRequest {
+  stops: Array<{
+    address: string;
+    city: string;
+    state: string;
+    zip: string;
+    contact_name?: string;
+    contact_phone?: string;
+    instructions?: string;
+    estimated_wait_minutes?: number;
+  }>;
+  total_route_miles: number;
+  vehicle_type?: VehicleType;
+  service_level: ServiceLevel;
+  package_weight?: number;
+  is_hipaa?: boolean;
+  requires_temperature_control?: boolean;
+  is_after_hours?: boolean;
+  driver_payout_override?: number;
+}
+
+export interface TripProfitability {
+  // Client-facing
+  client_price: number;
+  price_breakdown: {
+    base_fee: number;
+    additional_stops_fee: number;
+    mileage_fee: number;
+    wait_time_fee: number;
+    weight_surcharge: number;
+    hipaa_surcharge: number;
+    temperature_surcharge: number;
+    after_hours_surcharge: number;
+    subtotal_before_multiplier: number;
+    service_multiplier: number;
+  };
+
+  // Driver payout
+  driver_payout: number;
+  driver_payout_percentage: number;
+  driver_effective_hourly: number;
+
+  // Epyc profit
+  epyc_gross: number;
+  stripe_fee: number;
+  overhead_per_trip: number;
+  epyc_net_profit: number;
+  epyc_margin_percentage: number;
+
+  // Trip details
+  total_route_miles: number;
+  number_of_stops: number;
+  estimated_duration_minutes: number;
+  vehicle_type: VehicleType;
+  service_level: ServiceLevel;
+
+  // Platform comparison
+  platform_comparison: {
+    dispatchit_would_charge_client: number;
+    dispatchit_would_pay_driver: number;
+    epyc_driver_advantage: number;
+    epyc_driver_advantage_percentage: number;
+    epyc_client_savings: number;
+  };
+}
+
 // Dashboard Stats Types
 export interface DashboardStats {
   total_deliveries: number;

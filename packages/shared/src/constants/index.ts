@@ -130,8 +130,8 @@ export const PRICING = {
   hipaaSurcharge: 15.00,
   temperatureSurcharge: 25.00,
 
-  // Driver payout percentage
-  driverPayoutPercentage: 0.75, // 75% of base (tips are 100%)
+  // Driver payout percentage (single delivery via app)
+  driverPayoutPercentage: 0.60, // 60% of base (tips are 100%) — 1099 owner-operator model
 
   // Instant payout fee (we absorb this - competitor differentiator)
   instantPayoutFee: 0.00, // FREE - competitors charge 2-2.5%
@@ -168,6 +168,69 @@ export const SERVICE_AREAS = [
   { name: 'San Diego County', cities: ['San Diego', 'Chula Vista', 'Oceanside', 'Carlsbad'] },
   { name: 'Inland Empire', cities: ['Riverside', 'San Bernardino', 'Ontario', 'Rancho Cucamonga'] },
 ] as const;
+
+// ═══════════════════════════════════════════════════════════════════
+// 1099 OWNER-OPERATOR MODEL — MULTI-STOP TRIP PRICING
+// ═══════════════════════════════════════════════════════════════════
+
+// Multi-stop pricing by vehicle type
+export const MULTI_STOP_PRICING: Record<VehicleType, {
+  baseFee: number;          // Includes pickup + first delivery stop
+  perAdditionalStop: number; // Each stop after the first delivery
+  perMileRate: number;       // Per total route mile
+  minimumTripPrice: number;
+}> = {
+  car: { baseFee: 35.00, perAdditionalStop: 20.00, perMileRate: 2.50, minimumTripPrice: 45.00 },
+  suv: { baseFee: 45.00, perAdditionalStop: 25.00, perMileRate: 3.00, minimumTripPrice: 55.00 },
+  van: { baseFee: 65.00, perAdditionalStop: 30.00, perMileRate: 3.50, minimumTripPrice: 75.00 },
+  truck: { baseFee: 85.00, perAdditionalStop: 35.00, perMileRate: 4.00, minimumTripPrice: 95.00 },
+  box_truck: { baseFee: 120.00, perAdditionalStop: 45.00, perMileRate: 5.00, minimumTripPrice: 135.00 },
+} as const;
+
+// Wait time charges
+export const WAIT_TIME = {
+  freeMinutesPerStop: 10,
+  perMinuteCharge: 1.50,
+} as const;
+
+// After-hours surcharge
+export const AFTER_HOURS_SURCHARGE = 0.20; // 20% of subtotal
+
+// Driver payout tiers by trip type
+export const DRIVER_PAYOUT_TIERS = {
+  shortLocal: 0.55,       // Under 10 miles
+  standardMultiStop: 0.60, // Default
+  longRoute: 0.65,         // 50+ miles
+  medical: 0.55,           // HIPAA — premium surcharge covers driver
+  scheduledDaily: 0.50,    // Guaranteed volume = guaranteed income
+} as const;
+
+// Platform costs (Epyc overhead per transaction)
+export const PLATFORM_COSTS = {
+  stripe: {
+    percentage: 0.029,
+    fixedFee: 0.30,
+  },
+  monthlyOverhead: {
+    software: 200,      // Supabase, Vercel, Maps API
+    insurance: 400,     // General liability + cargo
+    marketing: 300,     // Ads, content, SEO
+    dispatchLabor: 0,   // Commander dispatches for now
+    total: 900,
+  },
+} as const;
+
+// Competitor benchmarks (for comparison calculations)
+export const COMPETITOR_BENCHMARKS = {
+  dispatchit: {
+    platformMarkup: 3.5,          // They charge ~3.5x what they pay drivers
+    driverPayoutPercentage: 0.26, // ~26% to driver
+  },
+  curri: {
+    platformMarkup: 3.0,
+    driverPayoutPercentage: 0.30,
+  },
+} as const;
 
 // API Configuration
 export const API = {

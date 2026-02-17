@@ -1,5 +1,5 @@
-import type { QuoteRequest, QuoteResponse, VehicleType, ServiceLevel, Coordinates, DeliveryStatus } from '../types';
-import { VEHICLE_CONFIG, SERVICE_LEVEL_CONFIG, PRICING, DELIVERY_STATUS_CONFIG } from '../constants';
+import type { QuoteRequest, QuoteResponse, MultiStopQuoteRequest, TripProfitability, VehicleType, ServiceLevel, Coordinates, DeliveryStatus } from '../types';
+import { VEHICLE_CONFIG, SERVICE_LEVEL_CONFIG, PRICING, DELIVERY_STATUS_CONFIG, MULTI_STOP_PRICING, WAIT_TIME, AFTER_HOURS_SURCHARGE, DRIVER_PAYOUT_TIERS, PLATFORM_COSTS, COMPETITOR_BENCHMARKS } from '../constants';
 
 /**
  * Calculate distance between two coordinates using Haversine formula
@@ -101,6 +101,144 @@ export function calculateQuote(
     total_price: totalPrice,
     driver_payout: driverPayout,
     vehicle_required: vehicleRequired,
+  };
+}
+
+/**
+ * Calculate multi-stop trip quote with full profitability analysis.
+ * Built for 1099 owner-operator model — driver covers own gas, insurance, vehicle.
+ */
+export function calculateMultiStopTrip(
+  request: MultiStopQuoteRequest,
+  estimatedMonthlyTrips: number = 100
+): TripProfitability {
+  const numberOfStops = request.stops.length;
+  const vehicleType = request.vehicle_type || 'car';
+  const vehiclePricing = MULTI_STOP_PRICING[vehicleType];
+  const serviceLevelConfig = SERVICE_LEVEL_CONFIG[request.service_level];
+
+  // Base fee (covers pickup + first delivery stop)
+  const baseFee = vehiclePricing.baseFee;
+
+  // Additional stops (stops beyond the first delivery)
+  const additionalStops = Math.max(0, numberOfStops - 1);
+  const additionalStopsFee = additionalStops * vehiclePricing.perAdditionalStop;
+
+  // Mileage
+  const mileageFee = request.total_route_miles * vehiclePricing.perMileRate;
+
+  // Wait time (excess wait beyond free minutes per stop)
+  let waitTimeFee = 0;
+  for (const stop of request.stops) {
+    const waitMinutes = stop.estimated_wait_minutes || 0;
+    const excessWait = Math.max(0, waitMinutes - WAIT_TIME.freeMinutesPerStop);
+    waitTimeFee += excessWait * WAIT_TIME.perMinuteCharge;
+  }
+
+  // Weight surcharge
+  let weightSurcharge = 0;
+  if (request.package_weight && request.package_weight > PRICING.weightSurchargeThreshold) {
+    const overWeight = request.package_weight - PRICING.weightSurchargeThreshold;
+    const increments = Math.ceil(overWeight / PRICING.weightSurchargeIncrement);
+    weightSurcharge = increments * PRICING.weightSurchargeAmount;
+  }
+
+  // Service surcharges
+  const hipaaSurcharge = request.is_hipaa ? PRICING.hipaaSurcharge : 0;
+  const temperatureSurcharge = request.requires_temperature_control ? PRICING.temperatureSurcharge : 0;
+
+  // Subtotal before multiplier
+  const subtotal = baseFee + additionalStopsFee + mileageFee + waitTimeFee
+    + weightSurcharge + hipaaSurcharge + temperatureSurcharge;
+
+  // After-hours surcharge (applied to subtotal)
+  const afterHoursSurcharge = request.is_after_hours ? subtotal * AFTER_HOURS_SURCHARGE : 0;
+  const subtotalWithAfterHours = subtotal + afterHoursSurcharge;
+
+  // Apply service level multiplier
+  let clientPrice = Math.round(subtotalWithAfterHours * serviceLevelConfig.multiplier * 100) / 100;
+
+  // Enforce minimum trip price
+  clientPrice = Math.max(clientPrice, vehiclePricing.minimumTripPrice);
+
+  // Determine driver payout percentage
+  let driverPayoutPercentage = request.driver_payout_override || DRIVER_PAYOUT_TIERS.standardMultiStop;
+  if (!request.driver_payout_override) {
+    if (request.is_hipaa) {
+      driverPayoutPercentage = DRIVER_PAYOUT_TIERS.medical;
+    } else if (request.total_route_miles >= 50) {
+      driverPayoutPercentage = DRIVER_PAYOUT_TIERS.longRoute;
+    } else if (request.total_route_miles < 10) {
+      driverPayoutPercentage = DRIVER_PAYOUT_TIERS.shortLocal;
+    }
+  }
+
+  // Driver payout
+  const driverPayout = Math.round(clientPrice * driverPayoutPercentage * 100) / 100;
+
+  // Epyc gross
+  const epycGross = Math.round((clientPrice - driverPayout) * 100) / 100;
+
+  // Stripe fee
+  const stripeFee = Math.round((clientPrice * PLATFORM_COSTS.stripe.percentage + PLATFORM_COSTS.stripe.fixedFee) * 100) / 100;
+
+  // Overhead allocation per trip
+  const overheadPerTrip = Math.round((PLATFORM_COSTS.monthlyOverhead.total / estimatedMonthlyTrips) * 100) / 100;
+
+  // Epyc net profit
+  const epycNetProfit = Math.round((epycGross - stripeFee - overheadPerTrip) * 100) / 100;
+  const epycMarginPercentage = Math.round((epycNetProfit / clientPrice) * 10000) / 100;
+
+  // Estimated duration (24 mph avg in LA + 5 min per stop for parking/delivery)
+  const drivingMinutes = Math.ceil(request.total_route_miles * 2.5);
+  const stopMinutes = numberOfStops * 5;
+  const totalWaitMinutes = request.stops.reduce((sum, s) => sum + (s.estimated_wait_minutes || 0), 0);
+  const estimatedDurationMinutes = drivingMinutes + stopMinutes + totalWaitMinutes;
+
+  // Driver effective hourly rate
+  const tripHours = estimatedDurationMinutes / 60;
+  const driverEffectiveHourly = Math.round((driverPayout / tripHours) * 100) / 100;
+
+  // Platform comparison — what DispatchIt would charge/pay
+  const dispatchitWouldPayDriver = driverPayout; // Assume same trip value
+  const dispatchitWouldChargeClient = Math.round(dispatchitWouldPayDriver / COMPETITOR_BENCHMARKS.dispatchit.driverPayoutPercentage * 100) / 100;
+  const epycDriverAdvantage = Math.round((driverPayout - (clientPrice * COMPETITOR_BENCHMARKS.dispatchit.driverPayoutPercentage)) * 100) / 100;
+  const dispatchitDriverPay = Math.round(clientPrice * COMPETITOR_BENCHMARKS.dispatchit.driverPayoutPercentage * 100) / 100;
+
+  return {
+    client_price: clientPrice,
+    price_breakdown: {
+      base_fee: baseFee,
+      additional_stops_fee: additionalStopsFee,
+      mileage_fee: Math.round(mileageFee * 100) / 100,
+      wait_time_fee: Math.round(waitTimeFee * 100) / 100,
+      weight_surcharge: weightSurcharge,
+      hipaa_surcharge: hipaaSurcharge,
+      temperature_surcharge: temperatureSurcharge,
+      after_hours_surcharge: Math.round(afterHoursSurcharge * 100) / 100,
+      subtotal_before_multiplier: Math.round(subtotalWithAfterHours * 100) / 100,
+      service_multiplier: serviceLevelConfig.multiplier,
+    },
+    driver_payout: driverPayout,
+    driver_payout_percentage: Math.round(driverPayoutPercentage * 100) / 100,
+    driver_effective_hourly: driverEffectiveHourly,
+    epyc_gross: epycGross,
+    stripe_fee: stripeFee,
+    overhead_per_trip: overheadPerTrip,
+    epyc_net_profit: epycNetProfit,
+    epyc_margin_percentage: epycMarginPercentage,
+    total_route_miles: request.total_route_miles,
+    number_of_stops: numberOfStops,
+    estimated_duration_minutes: estimatedDurationMinutes,
+    vehicle_type: vehicleType,
+    service_level: request.service_level,
+    platform_comparison: {
+      dispatchit_would_charge_client: dispatchitWouldChargeClient,
+      dispatchit_would_pay_driver: dispatchitDriverPay,
+      epyc_driver_advantage: Math.round((driverPayout - dispatchitDriverPay) * 100) / 100,
+      epyc_driver_advantage_percentage: Math.round(((driverPayout - dispatchitDriverPay) / dispatchitDriverPay) * 10000) / 100,
+      epyc_client_savings: Math.round((dispatchitWouldChargeClient - clientPrice) * 100) / 100,
+    },
   };
 }
 
