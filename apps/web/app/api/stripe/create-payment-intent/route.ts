@@ -1,12 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
-import { createClient } from '@/lib/supabase/server';
+import { createClient as createServerClient } from '@/lib/supabase/server';
+import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit, rateLimitHeaders, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { createPaymentIntentSchema, validateRequest } from '@/lib/validations';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!);
+function getStripe() {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    throw new Error('STRIPE_SECRET_KEY is not configured');
+  }
+  return new Stripe(process.env.STRIPE_SECRET_KEY);
+}
+
+// Service role client for bypassing RLS (needed for inserting payments)
+function getServiceSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+}
 
 export async function POST(request: NextRequest) {
+  const stripe = getStripe();
   // Rate limit by IP
   const clientId = getClientIdentifier(request);
   const rateLimitResult = checkRateLimit(`payment:${clientId}`, RATE_LIMITS.api);
@@ -19,7 +34,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const supabase = await createClient();
+    const supabase = await createServerClient();
 
     // Verify user is authenticated
     const {
@@ -62,7 +77,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if delivery is in a payable status
-    if (!['booked', 'quoted'].includes(delivery.status)) {
+    if (!['booked', 'quoted', 'assigned'].includes(delivery.status)) {
       return NextResponse.json(
         { error: 'This delivery cannot be paid for in its current status' },
         { status: 400 }
@@ -115,12 +130,12 @@ export async function POST(request: NextRequest) {
       description: `EPYC Courier - Delivery ${delivery.tracking_number}`,
     });
 
-    // Create payment record in database
-    await supabase.from('payments').insert({
+    // Create payment record in database (use service role to bypass RLS)
+    const serviceSupabase = getServiceSupabase();
+    await serviceSupabase.from('payments').insert({
       delivery_id,
       customer_id: user.id,
       amount: amount / 100, // Convert cents to dollars for storage
-      currency: 'usd',
       status: 'pending',
       stripe_payment_intent_id: paymentIntent.id,
     });
