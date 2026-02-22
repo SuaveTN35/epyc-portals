@@ -248,7 +248,7 @@ export default function LiveMapPage() {
           profiles:profile_id(full_name)
         )
       `)
-      .gte('updated_at', new Date(Date.now() - 30 * 60 * 1000).toISOString());
+      .gte('recorded_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString());
 
     if (locations) {
       setDriverLocations(
@@ -256,14 +256,14 @@ export default function LiveMapPage() {
           id: loc.id,
           driver_id: loc.driver_id,
           full_name: loc.driver?.profiles?.full_name || 'Unknown',
-          latitude: loc.latitude,
-          longitude: loc.longitude,
+          latitude: loc.lat,
+          longitude: loc.lng,
           heading: loc.heading,
           speed: loc.speed,
           vehicle_type: loc.driver?.vehicle_type || 'car',
           current_delivery_id: null,
           current_delivery_tracking: null,
-          updated_at: loc.updated_at,
+          updated_at: loc.recorded_at,
         }))
       );
     }
