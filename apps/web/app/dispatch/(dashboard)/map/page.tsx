@@ -245,9 +245,7 @@ export default function LiveMapPage() {
         driver:drivers(
           id,
           vehicle_type,
-          current_delivery_id,
-          profiles(full_name),
-          current_delivery:deliveries!drivers_current_delivery_id_fkey(tracking_number)
+          profiles:profile_id(full_name)
         )
       `)
       .gte('updated_at', new Date(Date.now() - 30 * 60 * 1000).toISOString());
@@ -263,8 +261,8 @@ export default function LiveMapPage() {
           heading: loc.heading,
           speed: loc.speed,
           vehicle_type: loc.driver?.vehicle_type || 'car',
-          current_delivery_id: loc.driver?.current_delivery_id,
-          current_delivery_tracking: loc.driver?.current_delivery?.tracking_number,
+          current_delivery_id: null,
+          current_delivery_tracking: null,
           updated_at: loc.updated_at,
         }))
       );
@@ -284,7 +282,7 @@ export default function LiveMapPage() {
         delivery_lat,
         delivery_lng,
         service_level,
-        driver:drivers(profiles(full_name))
+        driver_id
       `)
       .in('status', ['pending', 'assigned', 'picked_up', 'in_transit']);
 
@@ -300,7 +298,7 @@ export default function LiveMapPage() {
           delivery_address: d.delivery_address,
           delivery_lat: d.delivery_lat,
           delivery_lng: d.delivery_lng,
-          driver_name: d.driver?.profiles?.full_name || null,
+          driver_name: null,
           service_level: d.service_level,
         }))
       );
