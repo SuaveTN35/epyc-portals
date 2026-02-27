@@ -79,23 +79,23 @@ function RegisterForm() {
     }
   };
 
-  const uploadFile = async (supabase: ReturnType<typeof createClient>, file: File, path: string): Promise<string> => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${path}/${Date.now()}.${fileExt}`;
+  const uploadFile = async (_supabase: ReturnType<typeof createClient>, file: File, path: string): Promise<string> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('path', path);
 
-    const { error: uploadError } = await supabase.storage
-      .from('driver-documents')
-      .upload(fileName, file);
+    const res = await fetch('/api/upload', {
+      method: 'POST',
+      body: formData,
+    });
 
-    if (uploadError) {
-      throw new Error(`Failed to upload ${path}: ${uploadError.message}`);
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(`Failed to upload ${path}: ${data.error || 'Upload failed'}`);
     }
 
-    const { data: { publicUrl } } = supabase.storage
-      .from('driver-documents')
-      .getPublicUrl(fileName);
-
-    return publicUrl;
+    return data.url;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
