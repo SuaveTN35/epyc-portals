@@ -1,5 +1,6 @@
 import { Header } from '@/components/shared/Header';
 import { Footer } from '@/components/shared/Footer';
+import { StructuredData } from '@/components/shared/StructuredData';
 
 export default function MarketingLayout({
   children,
@@ -8,6 +9,7 @@ export default function MarketingLayout({
 }) {
   return (
     <>
+      <StructuredData />
       <Header />
       <main>{children}</main>
       <Footer />
