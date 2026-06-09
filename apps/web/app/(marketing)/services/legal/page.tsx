@@ -14,8 +14,20 @@ import {
 } from 'lucide-react';
 
 export const metadata: Metadata = {
-  title: 'Legal Courier Service',
+  title: 'Legal Courier Service Los Angeles',
   description: 'Professional legal courier service in Southern California. Same-day court filings, process service, proof of service documentation. Trusted by law firms.',
+  keywords: ['legal courier Los Angeles', 'court filing service', 'process service', 'same day legal delivery', 'law firm courier', 'proof of service'],
+  alternates: { canonical: '/services/legal' },
+  openGraph: {
+    title: 'Legal Courier Service Los Angeles | EPYC Courier Service',
+    description: 'Same-day court filings, process service, and legal document delivery across Southern California with proof of service.',
+    url: 'https://www.epyccs.com/services/legal',
+    type: 'website',
+  },
+  twitter: {
+    title: 'Legal Courier Service Los Angeles | EPYC Courier Service',
+    description: 'Same-day court filings, process service, and legal document delivery across Southern California.',
+  },
 };
 
 export default function LegalServicePage() {

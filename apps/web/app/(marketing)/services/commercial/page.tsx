@@ -14,8 +14,20 @@ import {
 } from 'lucide-react';
 
 export const metadata: Metadata = {
-  title: 'Commercial Delivery Service',
+  title: 'Commercial Delivery Service Los Angeles',
   description: 'Same-day commercial delivery service in Southern California. B2B logistics, scheduled routes, rush delivery. Parts, supplies, documents, and packages.',
+  keywords: ['commercial courier Los Angeles', 'B2B delivery', 'same day business delivery', 'scheduled route delivery', 'rush courier Southern California', 'parts delivery'],
+  alternates: { canonical: '/services/commercial' },
+  openGraph: {
+    title: 'Commercial Delivery Service Los Angeles | EPYC Courier Service',
+    description: 'Same-day B2B logistics, scheduled routes, and rush delivery across Southern California for parts, supplies, documents, and packages.',
+    url: 'https://www.epyccs.com/services/commercial',
+    type: 'website',
+  },
+  twitter: {
+    title: 'Commercial Delivery Service Los Angeles | EPYC Courier Service',
+    description: 'Same-day B2B logistics, scheduled routes, and rush delivery across Southern California.',
+  },
 };
 
 export default function CommercialServicePage() {

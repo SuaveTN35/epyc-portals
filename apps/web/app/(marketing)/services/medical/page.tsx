@@ -14,8 +14,20 @@ import {
 } from 'lucide-react';
 
 export const metadata: Metadata = {
-  title: 'Medical Courier Service',
+  title: 'Medical Courier Service Los Angeles',
   description: 'HIPAA-compliant medical courier service in Southern California. Specimen transport, pharmaceutical delivery, medical records, temperature-controlled vehicles. 24/7 service.',
+  keywords: ['medical courier Los Angeles', 'specimen transport', 'pharmaceutical delivery', 'HIPAA compliant courier', 'lab courier Southern California', 'temperature controlled delivery'],
+  alternates: { canonical: '/services/medical' },
+  openGraph: {
+    title: 'Medical Courier Service Los Angeles | EPYC Courier Service',
+    description: 'HIPAA-compliant specimen, pharmaceutical, and medical records delivery across Southern California. Temperature-controlled, chain of custody, 24/7.',
+    url: 'https://www.epyccs.com/services/medical',
+    type: 'website',
+  },
+  twitter: {
+    title: 'Medical Courier Service Los Angeles | EPYC Courier Service',
+    description: 'HIPAA-compliant specimen, pharmaceutical, and medical records delivery across Southern California.',
+  },
 };
 
 export default function MedicalServicePage() {
