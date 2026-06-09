@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useRef } from 'react';
-import { createClient } from '@/lib/supabase/client';
 import { Upload, X, Check, Loader2, Camera, FileText, Image } from 'lucide-react';
 
 interface DocumentUploadProps {
@@ -18,11 +17,13 @@ interface DocumentUploadProps {
 export default function DocumentUpload({
   label,
   description,
-  bucket,
+  // `bucket` is accepted for API compatibility with existing call sites but is
+  // no longer used: uploads now go through the service-role /api/upload route,
+  // which targets the driver-documents bucket and bypasses storage RLS.
   path,
   currentUrl,
   onUploadComplete,
-  accept = 'image/*',
+  accept = 'image/*,application/pdf',
   icon = 'camera',
 }: DocumentUploadProps) {
   const [uploading, setUploading] = useState(false);
@@ -52,8 +53,6 @@ export default function DocumentUpload({
     setUploading(true);
 
     try {
-      const supabase = createClient();
-
       // Create preview for images
       if (file.type.startsWith('image/')) {
         const reader = new FileReader();
@@ -61,28 +60,21 @@ export default function DocumentUpload({
         reader.readAsDataURL(file);
       }
 
-      // Generate unique filename
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${path}/${Date.now()}.${fileExt}`;
+      // Upload via the service-role API route (bypasses storage RLS, same
+      // pattern as driver registration). Direct browser uploads are blocked
+      // by default-deny RLS on the driver-documents bucket.
+      const body = new FormData();
+      body.append('file', file);
+      body.append('path', path);
 
-      // Upload to Supabase Storage
-      const { data, error: uploadError } = await supabase.storage
-        .from(bucket)
-        .upload(fileName, file, {
-          cacheControl: '3600',
-          upsert: true,
-        });
+      const res = await fetch('/api/upload', { method: 'POST', body });
+      const data = await res.json();
 
-      if (uploadError) {
-        throw uploadError;
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to upload file');
       }
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from(bucket)
-        .getPublicUrl(fileName);
-
-      onUploadComplete(urlData.publicUrl);
+      onUploadComplete(data.url);
     } catch (err: any) {
       console.error('Upload error:', err);
       setError(err.message || 'Failed to upload file');

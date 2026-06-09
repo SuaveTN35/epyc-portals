@@ -19,24 +19,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Validate file type
-    if (!file.type.startsWith('image/')) {
+    // Validate file type (images and PDFs - insurance cards and licenses are often PDFs)
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf';
+    if (!isImage && !isPdf) {
       return NextResponse.json(
-        { error: 'Only image files are allowed' },
+        { error: 'Only image or PDF files are allowed' },
         { status: 400 }
       );
     }
 
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
+    // Validate file size (max 10MB)
+    if (file.size > 10 * 1024 * 1024) {
       return NextResponse.json(
-        { error: 'File size must be less than 5MB' },
+        { error: 'File size must be less than 10MB' },
         { status: 400 }
       );
     }
 
     // Validate path (only allow known upload paths)
-    const allowedPaths = ['profile-photos', 'license-front', 'license-back'];
+    const allowedPaths = [
+      'profile-photos',
+      'license-front',
+      'license-back',
+      'licenses',
+      'insurance',
+      'registration',
+      'vehicles',
+    ];
     if (!allowedPaths.includes(path)) {
       return NextResponse.json(
         { error: 'Invalid upload path' },
@@ -44,8 +54,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${path}/${Date.now()}.${fileExt}`;
+    const fileExt = (file.name.split('.').pop() || (isPdf ? 'pdf' : 'jpg')).toLowerCase();
+    const fileName = `${path}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = Buffer.from(arrayBuffer);
