@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -8,6 +9,20 @@ const supabaseAdmin = createClient(
 
 export async function POST(request: NextRequest) {
   try {
+    // This route is intentionally unauthenticated: applicants upload their
+    // documents before an account exists. Rate limited so it cannot be used to
+    // dump arbitrary files into the bucket.
+    const rate = checkRateLimit(
+      `upload:${getClientIdentifier(request)}`,
+      RATE_LIMITS.quotes
+    );
+    if (!rate.success) {
+      return NextResponse.json(
+        { error: 'Too many uploads. Please wait a moment and try again.' },
+        { status: 429 }
+      );
+    }
+
     const formData = await request.formData();
     const file = formData.get('file') as File | null;
     const path = formData.get('path') as string | null;
@@ -75,11 +90,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: { publicUrl } } = supabaseAdmin.storage
-      .from('driver-documents')
-      .getPublicUrl(fileName);
-
-    return NextResponse.json({ url: publicUrl });
+    // The driver-documents bucket is PRIVATE. Return the storage path, which is
+    // what we persist; viewing is done through a short-lived signed URL issued to
+    // staff. `url` is kept for backward compatibility with older clients but is
+    // no longer publicly readable.
+    return NextResponse.json({ path: fileName, url: fileName });
   } catch (err) {
     console.error('Upload route error:', err);
     return NextResponse.json(

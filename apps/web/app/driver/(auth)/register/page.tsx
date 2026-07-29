@@ -95,7 +95,8 @@ function RegisterForm() {
       throw new Error(`Failed to upload ${path}: ${data.error || 'Upload failed'}`);
     }
 
-    return data.url;
+    // Storage path, not a public URL. The bucket is private.
+    return data.path ?? data.url;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -155,6 +156,9 @@ function RegisterForm() {
         email: formData.email,
         password: formData.password,
         options: {
+          // Send the verification link back through our callback so a verified
+          // driver lands on onboarding instead of the marketing home page.
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/driver/onboarding`,
           data: {
             full_name: formData.full_name,
             phone: formData.phone,
@@ -173,6 +177,22 @@ function RegisterForm() {
         return;
       }
 
+      // Best effort. The application is already recorded by this point, so a
+      // mail failure must never present as a failed submission.
+      try {
+        await fetch('/api/notify/driver-application', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            full_name: formData.full_name,
+            email: formData.email,
+            phone: formData.phone,
+          }),
+        });
+      } catch (notifyErr) {
+        console.error('Application notification failed:', notifyErr);
+      }
+
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred during registration');
@@ -186,10 +206,18 @@ function RegisterForm() {
         <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
           <CheckCircle className="h-8 w-8 text-green-600" />
         </div>
-        <h3 className="text-xl font-bold text-gray-900 mb-2">Application Submitted!</h3>
+        <h3 className="text-xl font-bold text-gray-900 mb-2">Application Submitted</h3>
+        <p className="text-gray-600 mb-4">
+          We sent a confirmation to your email. Click the verification link in it to finish setting
+          up your account and add your vehicle and insurance details.
+        </p>
         <p className="text-gray-600 mb-6">
-          Please check your email to verify your account. Once verified, you'll be able to complete
-          your driver onboarding.
+          Our team reviews your application and calls you within two business days. If you have not
+          heard back, call or text Rico at{' '}
+          <a href="tel:8182170070" className="text-epyc-primary font-semibold">
+            (818) 217-0070
+          </a>
+          .
         </p>
         <Link
           href="/driver/login"

@@ -74,7 +74,8 @@ export default function DocumentUpload({
         throw new Error(data.error || 'Failed to upload file');
       }
 
-      onUploadComplete(data.url);
+      // Storage path, not a public URL. The driver-documents bucket is private.
+      onUploadComplete(data.path ?? data.url);
     } catch (err: any) {
       console.error('Upload error:', err);
       setError(err.message || 'Failed to upload file');

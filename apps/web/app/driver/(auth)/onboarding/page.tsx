@@ -126,6 +126,13 @@ export default function DriverOnboardingPage() {
       .update({ role: 'driver' })
       .eq('id', user.id);
 
+    // Documents are complete; the application moves to background-check screening.
+    await supabase
+      .from('driver_applications')
+      .update({ status: 'screening', updated_at: new Date().toISOString() })
+      .eq('profile_id', user.id)
+      .in('status', ['pending_review', 'contacted']);
+
     // Redirect to driver dashboard
     router.push('/driver/jobs');
   };

@@ -61,7 +61,11 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Check driver role for driver portal
+  // Check driver role for driver portal.
+  //
+  // Gate on the drivers row, not on the role. Role alone is not proof of a
+  // completed onboarding: an applicant is role 'driver' from the moment they
+  // register, but has no drivers record until stage 2 finishes.
   if (isDriverProtected && user) {
     const { data: profile } = await supabase
       .from('profiles')
@@ -70,17 +74,21 @@ export async function middleware(request: NextRequest) {
       .single();
 
     if (profile?.role !== 'driver') {
-      const { data: driver } = await supabase
-        .from('drivers')
-        .select('id, background_check_status')
-        .eq('profile_id', user.id)
-        .single();
+      const url = request.nextUrl.clone();
+      url.pathname = '/driver/register';
+      return NextResponse.redirect(url);
+    }
 
-      if (!driver) {
-        const url = request.nextUrl.clone();
-        url.pathname = '/driver/onboarding';
-        return NextResponse.redirect(url);
-      }
+    const { data: driver } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('profile_id', user.id)
+      .maybeSingle();
+
+    if (!driver) {
+      const url = request.nextUrl.clone();
+      url.pathname = '/driver/onboarding';
+      return NextResponse.redirect(url);
     }
   }
 

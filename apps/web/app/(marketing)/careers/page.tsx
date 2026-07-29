@@ -8,7 +8,6 @@ import {
   MapPin,
   CheckCircle,
   Phone,
-  Mail,
   Star,
   Thermometer,
   FileText,
@@ -70,8 +69,8 @@ const jobPostingSchema = {
     name: 'EPYC Courier Service',
     value: 'EPYC-DRIVER-2026-001',
   },
-  datePosted: '2026-02-08',
-  validThrough: '2026-06-30',
+  datePosted: '2026-07-28',
+  validThrough: '2026-12-31',
   employmentType: 'CONTRACTOR',
   hiringOrganization: {
     '@type': 'Organization',
@@ -343,36 +342,41 @@ export default function CareersPage() {
             Ready to Drive With EPYC?
           </h2>
           <p className="text-xl text-white/90 mb-8">
-            Send us your info and we will get back to you within 24 hours.
+            Apply online in about five minutes. We review every application and call you
+            within two business days.
           </p>
 
           <div className="bg-white/10 backdrop-blur rounded-2xl p-8 text-left max-w-xl mx-auto">
-            <p className="text-white/90 mb-6">
-              Reply with:
-            </p>
+            <p className="text-white/90 mb-6">Have these ready:</p>
             <ol className="space-y-3 text-white/90 list-decimal list-inside mb-8">
-              <li>Your name and phone number</li>
-              <li>Your vehicle type (year, make, model)</li>
-              <li>Your zip code</li>
-              <li>Days and hours you are available</li>
-              <li>Any courier or delivery experience</li>
+              <li>A clear photo of your face</li>
+              <li>Photos of the front and back of your driver&apos;s license</li>
+              <li>Your phone number and email address</li>
+              <li>Your vehicle year, make, and model</li>
+              <li>Your current insurance and registration</li>
             </ol>
 
             <div className="space-y-4">
-              <a
-                href="mailto:rico@epyccs.com?subject=Driver%20Application%20-%20Epyc%20Courier&body=Name%3A%20%0APhone%3A%20%0AVehicle%20(Year%2C%20Make%2C%20Model)%3A%20%0AZip%20Code%3A%20%0AAvailability%20(Days%2FHours)%3A%20%0ACourier%20Experience%3A%20"
+              <Link
+                href="/driver/register"
                 className="btn btn-lg bg-white text-epyc-primary hover:bg-gray-100 w-full text-center flex items-center justify-center"
               >
-                <Mail className="mr-2 h-5 w-5" />
-                Email Your Application
-              </a>
+                <FileText className="mr-2 h-5 w-5" />
+                Start Your Application
+              </Link>
               <a
                 href="tel:8182170070"
                 className="btn btn-lg border-white text-white hover:bg-white/10 w-full text-center flex items-center justify-center"
               >
                 <Phone className="mr-2 h-5 w-5" />
-                Call Rico: (818) 217-0070
+                Or Call Rico: (818) 217-0070
               </a>
+              <p className="text-white/70 text-sm text-center pt-2">
+                Prefer email? Reach us at{' '}
+                <a href="mailto:admin@epyccs.com" className="underline">
+                  admin@epyccs.com
+                </a>
+              </p>
             </div>
           </div>
 
