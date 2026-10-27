@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Mail, Lock, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 import Image from 'next/image';
+import Link from 'next/link';
 
 export default function DispatchLoginPage() {
   const router = useRouter();
@@ -119,6 +120,15 @@ export default function DispatchLoginPage() {
                   placeholder="Enter your password"
                 />
               </div>
+            </div>
+
+            <div className="flex justify-end -mt-3">
+              <Link
+                href="/auth/forgot-password"
+                className="text-sm font-medium text-epyc-primary hover:text-epyc-secondary"
+              >
+                Forgot password?
+              </Link>
             </div>
 
             <button

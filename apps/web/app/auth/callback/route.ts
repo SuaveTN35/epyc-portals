@@ -10,12 +10,20 @@ import { createClient } from '@/lib/supabase/server';
  *
  * Exchanges the code for a session, then routes by what the account still needs.
  */
+const RESET_PASSWORD_PATH = '/auth/reset-password';
+
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get('code');
   const next = searchParams.get('next');
+  // Password reset links carry next=/auth/reset-password. That one exact path
+  // is honoured for every role; any other `next` keeps the rules below.
+  const isPasswordReset = next === RESET_PASSWORD_PATH;
 
   if (!code) {
+    if (isPasswordReset) {
+      return NextResponse.redirect(`${origin}/auth/forgot-password?error=expired`);
+    }
     return NextResponse.redirect(`${origin}/driver/login?error=missing_code`);
   }
 
@@ -24,6 +32,9 @@ export async function GET(request: NextRequest) {
 
   if (error) {
     console.error('[auth/callback] code exchange failed:', error.message);
+    if (isPasswordReset) {
+      return NextResponse.redirect(`${origin}/auth/forgot-password?error=expired`);
+    }
     return NextResponse.redirect(`${origin}/driver/login?error=verification_failed`);
   }
 
@@ -33,6 +44,10 @@ export async function GET(request: NextRequest) {
 
   if (!user) {
     return NextResponse.redirect(`${origin}/driver/login`);
+  }
+
+  if (isPasswordReset) {
+    return NextResponse.redirect(`${origin}${RESET_PASSWORD_PATH}`);
   }
 
   const { data: profile } = await supabase
