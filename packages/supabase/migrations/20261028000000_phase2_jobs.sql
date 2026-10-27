@@ -11,7 +11,7 @@
 -- and 20261027000100_phase1_dispatch_alignment.sql (drivers.status).
 
 -- --------------------------------------------
--- 1. deliveries.source / deliveries.source_reference
+-- 1. deliveries.source / source_reference / loading_required
 -- --------------------------------------------
 -- Where a job came from (Curri, Walmart Spark, a broker, a phone call) and
 -- that platform's own job or order number, so dispatch can reconcile payouts.
@@ -34,6 +34,12 @@ BEGIN
 END $$;
 
 CREATE INDEX IF NOT EXISTS idx_deliveries_source ON public.deliveries(source);
+
+-- Driver must load or unload (no dock help). Shown as a tag on the job.
+-- Drivers cannot change it: the guard trigger in section 3 allow-lists only
+-- status and pickup/delivery times.
+ALTER TABLE public.deliveries
+  ADD COLUMN IF NOT EXISTS loading_required boolean NOT NULL DEFAULT false;
 
 -- --------------------------------------------
 -- 2. proof_of_delivery.stage / proof_of_delivery.photo_kind

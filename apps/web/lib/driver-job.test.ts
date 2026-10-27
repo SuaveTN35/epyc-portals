@@ -10,6 +10,8 @@ import {
   resolvedNote,
   parseMapApp,
   navUrl,
+  jobTags,
+  dimensionsLabel,
 } from './driver-job';
 
 describe('ready-time gate', () => {
@@ -78,5 +80,22 @@ describe('navigation', () => {
     expect(navUrl('google', '1 Main St', { lat: 1, lng: 2 })).toContain('destination=1,2');
     expect(navUrl('apple', '1 Main St', null)).toBe('https://maps.apple.com/?daddr=1%20Main%20St');
     expect(navUrl('waze', 'x', { lat: 3, lng: 4 })).toBe('https://waze.com/ul?ll=3,4&navigate=yes');
+  });
+});
+
+
+describe('tags and order', () => {
+  it('tags heavy items over 150 lbs and loading', () => {
+    expect(jobTags({ package_weight: 150 })).toEqual([]);
+    expect(jobTags({ package_weight: 151, loading_required: true })).toEqual([
+      'Heavy item',
+      'Loading required',
+    ]);
+    expect(jobTags({})).toEqual([]);
+  });
+  it('formats dimensions', () => {
+    expect(dimensionsLabel(24, 18, 12)).toBe('24 x 18 x 12 in');
+    expect(dimensionsLabel(24, null, null)).toBe('24 x ? x ? in');
+    expect(dimensionsLabel(null, null, null)).toBeNull();
   });
 });

@@ -63,6 +63,7 @@ export interface NewJobForm {
   vehicle_required: VehicleType;
   requires_signature: boolean;
   requires_photo_pod: boolean;
+  loading_required: boolean;
 
   total_price: string;
   driver_payout: string;
@@ -96,6 +97,7 @@ export const EMPTY_NEW_JOB: NewJobForm = {
   vehicle_required: 'car',
   requires_signature: true,
   requires_photo_pod: true,
+  loading_required: false,
   total_price: '',
   driver_payout: '',
 };
@@ -265,6 +267,7 @@ export function buildNewJobRow(
     vehicle_required: form.vehicle_required,
     requires_signature: form.requires_signature,
     requires_photo_pod: form.requires_photo_pod,
+    loading_required: form.loading_required,
     is_hipaa: false,
     is_medical: false,
 

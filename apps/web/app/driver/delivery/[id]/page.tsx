@@ -28,6 +28,8 @@ import {
   buildPickupProofRows,
   canDriverMoveTo,
   driverStepFor,
+  dropoffChecklist,
+  pickupChecklist,
   validateDropoffProof,
   validatePickupProof,
   type LeftWith,
@@ -42,8 +44,10 @@ import {
   EPYC_DISPATCH_PHONE_TEL,
   MAP_APPS,
   MAP_APP_STORAGE_KEY,
+  dimensionsLabel,
   isBeforeReadyTime,
   isReleasable,
+  jobTags,
   navUrl,
   parseMapApp,
   readyTimeLabel,
@@ -51,7 +55,19 @@ import {
 } from '@/lib/driver-job';
 
 // Live columns not on the shared Delivery type.
-type DriverDelivery = Delivery & { source_reference?: string | null };
+type DriverDelivery = Delivery & {
+  source_reference?: string | null;
+  loading_required?: boolean | null;
+};
+
+interface PickupLive {
+  itemPhotos: number;
+  receiptOrNote: boolean;
+}
+interface DropoffLive {
+  placementPhotos: number;
+  recipientAndSignature: boolean;
+}
 
 export default function DeliveryDetailPage() {
   const params = useParams();
@@ -68,6 +84,11 @@ export default function DeliveryDetailPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [mapApp, setMapApp] = useState<MapApp | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [pickupLive, setPickupLive] = useState<PickupLive>({ itemPhotos: 0, receiptOrNote: false });
+  const [dropoffLive, setDropoffLive] = useState<DropoffLive>({
+    placementPhotos: 0,
+    recipientAndSignature: false,
+  });
 
   // Preferred map app, chosen once and remembered on this phone.
   useEffect(() => {
@@ -194,6 +215,21 @@ export default function DeliveryDetailPage() {
     setShowNavSheet(false);
   };
 
+  // Navigate to a specific stop (from the stop cards).
+  const [navTarget, setNavTarget] = useState<{
+    address: string;
+    coords: { lat: number; lng: number } | null;
+  } | null>(null);
+
+  const openNavigationTo = (
+    app: MapApp,
+    target: { address: string; coords: { lat: number; lng: number } | null }
+  ) => {
+    window.open(navUrl(app, target.address, target.coords), '_blank');
+    setShowNavSheet(false);
+    setNavTarget(null);
+  };
+
   // Start Nav: open the remembered app directly, or ask once.
   const startNav = () => {
     if (mapApp) openNavigation(mapApp);
@@ -207,7 +243,8 @@ export default function DeliveryDetailPage() {
     } catch {
       // Not remembered; still navigate.
     }
-    openNavigation(app);
+    if (navTarget) openNavigationTo(app, navTarget);
+    else openNavigation(app);
   };
 
   if (loading) {
@@ -372,14 +409,20 @@ export default function DeliveryDetailPage() {
         )}
 
         {step === 'pickup_proof' && (
-          <PickupProofPanel deliveryId={deliveryId} onDone={fetchDelivery} />
+          <PickupProofPanel
+            deliveryId={deliveryId}
+            onDone={fetchDelivery}
+            onProgress={setPickupLive}
+          />
         )}
 
         {step === 'dropoff_proof' && (
           <DropoffProofPanel
             deliveryId={deliveryId}
             requiresSignature={!!delivery.requires_signature}
+            allowRecipientPhoto={!delivery.is_medical && !delivery.is_hipaa}
             onDone={() => router.push('/driver/earnings')}
+            onProgress={setDropoffLive}
           />
         )}
 
@@ -393,36 +436,63 @@ export default function DeliveryDetailPage() {
         )}
       </div>
 
-      {/* Job details: pay, notes, stops, contacts, items, vehicle */}
+      {/* Job details: pay, tags, order, notes, Stop 1 of 2 and Stop 2 of 2 */}
       <JobDetailsCard
         payout={delivery.driver_payout}
-        packageDescription={delivery.package_description}
-        packageWeight={delivery.package_weight}
+        tags={jobTags(delivery)}
         vehicleRequired={delivery.vehicle_required}
+        order={{
+          reference: delivery.source_reference,
+          description: delivery.package_description,
+          weight: delivery.package_weight,
+          dimensions: dimensionsLabel(
+            delivery.package_length,
+            delivery.package_width,
+            delivery.package_height
+          ),
+        }}
+        onNavigate={(stop) => {
+          const target = {
+            address: `${stop.address}, ${stop.cityLine}`,
+            coords: stop.lat != null && stop.lng != null ? { lat: stop.lat, lng: stop.lng } : null,
+          };
+          if (mapApp) openNavigationTo(mapApp, target);
+          else {
+            setNavTarget(target);
+            setShowNavSheet(true);
+          }
+        }}
         stops={[
           {
             label: 'Pickup',
+            name: delivery.pickup_contact_name,
             address: delivery.pickup_address,
             cityLine: `${delivery.pickup_city}, ${delivery.pickup_state} ${delivery.pickup_zip}`,
-            contactName: delivery.pickup_contact_name,
             contactPhone: delivery.pickup_contact_phone,
             instructions: delivery.pickup_instructions,
             windowStart: delivery.pickup_window_start,
             windowEnd: delivery.pickup_window_end,
             lat: delivery.pickup_lat,
             lng: delivery.pickup_lng,
+            checklist: pickupChecklist(delivery.status, step === 'pickup_proof' ? pickupLive : {}),
+            active: step === 'to_pickup' || step === 'pickup_proof',
           },
           {
             label: 'Drop-off',
+            name: delivery.delivery_contact_name,
             address: delivery.delivery_address,
             cityLine: `${delivery.delivery_city}, ${delivery.delivery_state} ${delivery.delivery_zip}`,
-            contactName: delivery.delivery_contact_name,
             contactPhone: delivery.delivery_contact_phone,
             instructions: delivery.delivery_instructions,
             windowStart: delivery.delivery_window_start,
             windowEnd: delivery.delivery_window_end,
             lat: delivery.delivery_lat,
             lng: delivery.delivery_lng,
+            checklist: dropoffChecklist(
+              delivery.status,
+              step === 'dropoff_proof' ? dropoffLive : {}
+            ),
+            active: step === 'to_dropoff' || step === 'dropoff_proof',
           },
         ]}
       />
@@ -514,7 +584,13 @@ export default function DeliveryDetailPage() {
 
       {/* Navigation App Selector (choice is remembered) */}
       {showNavSheet && (
-        <NavigationSheet onSelect={chooseMapApp} onClose={() => setShowNavSheet(false)} />
+        <NavigationSheet
+          onSelect={chooseMapApp}
+          onClose={() => {
+            setShowNavSheet(false);
+            setNavTarget(null);
+          }}
+        />
       )}
 
       {showReleaseSheet && (
@@ -688,7 +764,15 @@ function ProofError({ message }: { message: string | null }) {
  * (or "No receipt given" with a note). Proof rows are saved first; only then
  * is the job marked picked_up. The database refuses picked_up without them.
  */
-function PickupProofPanel({ deliveryId, onDone }: { deliveryId: string; onDone: () => void }) {
+function PickupProofPanel({
+  deliveryId,
+  onDone,
+  onProgress,
+}: {
+  deliveryId: string;
+  onDone: () => void;
+  onProgress: (live: PickupLive) => void;
+}) {
   const supabase = createClient();
   const [itemPhotos, setItemPhotos] = useState<CapturedPhoto[]>([]);
   const [receiptPhotos, setReceiptPhotos] = useState<CapturedPhoto[]>([]);
@@ -704,6 +788,12 @@ function PickupProofPanel({ deliveryId, onDone }: { deliveryId: string; onDone: 
     noReceipt,
     note,
   };
+
+  // Tick the stop checklist as photos are taken.
+  const receiptOrNote = noReceipt ? note.trim().length >= 3 : receiptPhotos.length > 0;
+  useEffect(() => {
+    onProgress({ itemPhotos: itemPhotos.length, receiptOrNote });
+  }, [itemPhotos.length, receiptOrNote]);
 
   const complete = async () => {
     setError(null);
@@ -819,11 +909,16 @@ function PickupProofPanel({ deliveryId, onDone }: { deliveryId: string; onDone: 
 function DropoffProofPanel({
   deliveryId,
   requiresSignature,
+  allowRecipientPhoto,
   onDone,
+  onProgress,
 }: {
   deliveryId: string;
   requiresSignature: boolean;
+  /** False for medical / HIPAA jobs: no photo of the person at all. */
+  allowRecipientPhoto: boolean;
   onDone: () => void;
+  onProgress: (live: DropoffLive) => void;
 }) {
   const supabase = createClient();
   const [recipientName, setRecipientName] = useState('');
@@ -842,11 +937,18 @@ function DropoffProofPanel({
     leftWith,
     note,
     placementPhotos: placementPhotos.map((p) => p.path),
-    recipientPhotos: recipientPhotos.map((p) => p.path),
+    recipientPhotos: allowRecipientPhoto ? recipientPhotos.map((p) => p.path) : [],
     signature,
     requiresSignature,
     noSignature,
   };
+
+  const recipientAndSignature =
+    recipientName.trim().length > 0 &&
+    (!!signature || (noSignature && note.trim().length >= 3) || (!requiresSignature && !!leftWith));
+  useEffect(() => {
+    onProgress({ placementPhotos: placementPhotos.length, recipientAndSignature });
+  }, [placementPhotos.length, recipientAndSignature]);
 
   const complete = async () => {
     setError(null);
@@ -954,16 +1056,20 @@ function DropoffProofPanel({
         disabled={locked}
       />
 
-      <ProofPhotoCapture
-        deliveryId={deliveryId}
-        stage="delivery"
-        kind="recipient"
-        label="Photo of who it was left with (optional)"
-        max={MAX_RECIPIENT_PHOTOS}
-        photos={recipientPhotos}
-        onChange={setRecipientPhotos}
-        disabled={locked}
-      />
+      {/* Optional pending a Commander decision; never on medical / HIPAA jobs. */}
+      {allowRecipientPhoto && (
+        <ProofPhotoCapture
+          deliveryId={deliveryId}
+          stage="delivery"
+          kind="recipient"
+          label="Photo of who it was left with (optional)"
+          max={MAX_RECIPIENT_PHOTOS}
+          photos={recipientPhotos}
+          onChange={setRecipientPhotos}
+          disabled={locked}
+          guidance="Only with the recipient's permission."
+        />
+      )}
 
       {!noSignature && (
         <div>

@@ -154,3 +154,28 @@ export function navUrl(
         : `https://waze.com/ul?q=${q}&navigate=yes`;
   }
 }
+
+// ---------------------------------------------------------------- tags and order
+
+export const HEAVY_ITEM_LBS = 150;
+
+export function jobTags(d: {
+  package_weight?: number | null;
+  loading_required?: boolean | null;
+}): string[] {
+  const tags: string[] = [];
+  if (d.package_weight != null && Number(d.package_weight) > HEAVY_ITEM_LBS) tags.push('Heavy item');
+  if (d.loading_required) tags.push('Loading required');
+  return tags;
+}
+
+/** "24 x 18 x 12 in", or null when no dimension is set. */
+export function dimensionsLabel(
+  l: number | null | undefined,
+  w: number | null | undefined,
+  h: number | null | undefined
+): string | null {
+  if (l == null && w == null && h == null) return null;
+  const v = (n: number | null | undefined) => (n == null ? '?' : String(Number(n)));
+  return `${v(l)} x ${v(w)} x ${v(h)} in`;
+}

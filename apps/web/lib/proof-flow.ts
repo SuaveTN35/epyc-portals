@@ -215,3 +215,49 @@ export function buildDropoffProofRows(
 export function mapsLink(lat: number, lng: number): string {
   return `https://www.google.com/maps?q=${lat},${lng}`;
 }
+
+// ---------------------------------------------------------------- checklists
+
+export const PHOTO_GUIDANCE =
+  'Make sure items and labels are fully visible. Do not include people in the photo.';
+
+export interface ChecklistItem {
+  label: string;
+  done: boolean;
+}
+
+function reached(status: string, target: DriverFlowStatus): boolean {
+  const a = DRIVER_FLOW.indexOf(status as DriverFlowStatus);
+  return a >= 0 && a >= DRIVER_FLOW.indexOf(target);
+}
+
+/**
+ * Pickup steps. Status decides Arrive and Pickup complete; the live flags
+ * (photos taken on this screen) tick the middle steps before submit. Once
+ * the pickup is complete every step is done.
+ */
+export function pickupChecklist(
+  status: string,
+  live: { itemPhotos?: number; receiptOrNote?: boolean } = {}
+): ChecklistItem[] {
+  const complete = reached(status, 'picked_up');
+  return [
+    { label: 'Arrive', done: reached(status, 'arrived_pickup') },
+    { label: 'Photo of items', done: complete || (live.itemPhotos ?? 0) > 0 },
+    { label: 'Receipt / BOL', done: complete || !!live.receiptOrNote },
+    { label: 'Pickup complete', done: complete },
+  ];
+}
+
+export function dropoffChecklist(
+  status: string,
+  live: { placementPhotos?: number; recipientAndSignature?: boolean } = {}
+): ChecklistItem[] {
+  const complete = reached(status, 'delivered');
+  return [
+    { label: 'Arrive', done: reached(status, 'arrived_delivery') },
+    { label: 'Photo of where left', done: complete || (live.placementPhotos ?? 0) > 0 },
+    { label: 'Recipient name + signature', done: complete || !!live.recipientAndSignature },
+    { label: 'Complete', done: complete },
+  ];
+}

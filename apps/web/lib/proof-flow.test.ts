@@ -9,6 +9,8 @@ import {
   proofPhotoPath,
   LEFT_WITHOUT_SIGNATURE_PREFIX,
   NO_RECEIPT_PREFIX,
+  pickupChecklist,
+  dropoffChecklist,
   type DropoffProofInput,
 } from './proof-flow';
 
@@ -139,5 +141,31 @@ describe('drop-off proof', () => {
 describe('proofPhotoPath', () => {
   it('starts with the delivery id folder', () => {
     expect(proofPhotoPath('abc', 'pickup', 'item', 123)).toMatch(/^abc\/pickup-item-123-[a-z0-9]+\.jpg$/);
+  });
+});
+
+
+describe('checklists', () => {
+  const done = (items: { done: boolean }[]) => items.map((i) => i.done);
+  it('pickup follows status and live photos', () => {
+    expect(done(pickupChecklist('assigned'))).toEqual([false, false, false, false]);
+    expect(done(pickupChecklist('arrived_pickup', { itemPhotos: 1 }))).toEqual([true, true, false, false]);
+    expect(done(pickupChecklist('arrived_pickup', { itemPhotos: 2, receiptOrNote: true }))).toEqual([
+      true,
+      true,
+      true,
+      false,
+    ]);
+    expect(done(pickupChecklist('en_route_delivery'))).toEqual([true, true, true, true]);
+  });
+  it('drop-off follows status and live proof', () => {
+    expect(done(dropoffChecklist('picked_up'))).toEqual([false, false, false, false]);
+    expect(done(dropoffChecklist('arrived_delivery', { placementPhotos: 1 }))).toEqual([
+      true,
+      true,
+      false,
+      false,
+    ]);
+    expect(done(dropoffChecklist('delivered'))).toEqual([true, true, true, true]);
   });
 });

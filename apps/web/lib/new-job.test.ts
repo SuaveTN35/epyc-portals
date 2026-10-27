@@ -83,6 +83,7 @@ describe('buildNewJobRow', () => {
     expect(row.is_medical).toBe(false);
     expect(row.requires_signature).toBe(true);
     expect(row.requires_photo_pod).toBe(true);
+    expect(row.loading_required).toBe(false);
     expect(row.pickup_window_start).toBeNull();
   });
 });

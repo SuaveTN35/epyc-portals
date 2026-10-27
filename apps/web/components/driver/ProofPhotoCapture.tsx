@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Camera, Loader2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { shrinkImage, isImageFile } from '@/lib/upload-client';
-import { proofPhotoPath, type PhotoKind } from '@/lib/proof-flow';
+import { PHOTO_GUIDANCE, proofPhotoPath, type PhotoKind } from '@/lib/proof-flow';
 
 export interface CapturedPhoto {
   path: string;
@@ -22,6 +22,8 @@ interface ProofPhotoCaptureProps {
   photos: CapturedPhoto[];
   onChange: (photos: CapturedPhoto[]) => void;
   disabled?: boolean;
+  /** Replaces the standard photo guidance line (used for the recipient photo). */
+  guidance?: string;
   /** Override the storage path (must still start with `<deliveryId>/`). */
   pathFor?: () => string;
 }
@@ -44,6 +46,7 @@ export function ProofPhotoCapture({
   onChange,
   disabled,
   pathFor,
+  guidance = PHOTO_GUIDANCE,
 }: ProofPhotoCaptureProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -112,7 +115,8 @@ export function ProofPhotoCapture({
           {photos.length}/{max}
         </span>
       </p>
-      {hint && <p className="text-xs text-gray-500 mb-2">{hint}</p>}
+      {hint && <p className="text-xs text-gray-500">{hint}</p>}
+      <p className="text-xs text-gray-500 mb-2">{guidance}</p>
 
       {photos.length > 0 && (
         <div className="grid grid-cols-4 gap-2 my-2">
