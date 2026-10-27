@@ -26,6 +26,15 @@ import {
   deliveryStatusBadge,
   deliveryStatusLabel,
 } from '@/lib/delivery-status';
+import { openExceptions } from '@/lib/driver-job';
+
+interface OpenProblem {
+  id: string;
+  delivery_id: string;
+  tracking_number: string;
+  notes: string | null;
+  created_at: string;
+}
 
 interface DashboardStats {
   activeDeliveries: number;
@@ -70,6 +79,7 @@ export default function DashboardPage() {
   });
   const [recentDeliveries, setRecentDeliveries] = useState<RecentDelivery[]>([]);
   const [driverStatuses, setDriverStatuses] = useState<DriverStatus[]>([]);
+  const [openProblems, setOpenProblems] = useState<OpenProblem[]>([]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -79,6 +89,25 @@ export default function DashboardPage() {
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+
+      // Driver-reported problems from the last 14 days that are not resolved.
+      const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const { data: problemEvents } = await supabase
+        .from('delivery_events')
+        .select('id, delivery_id, event_type, notes, created_at, delivery:deliveries(tracking_number)')
+        .in('event_type', ['exception', 'exception_resolved'])
+        .gte('created_at', since)
+        .order('created_at', { ascending: false })
+        .limit(500);
+      setOpenProblems(
+        openExceptions((problemEvents || []) as any[]).map((e: any) => ({
+          id: e.id,
+          delivery_id: e.delivery_id,
+          tracking_number: e.delivery?.tracking_number || 'Job',
+          notes: e.notes,
+          created_at: e.created_at,
+        }))
+      );
 
       // Fetch active deliveries count
       const { count: activeCount } = await supabase
@@ -290,6 +319,38 @@ export default function DashboardPage() {
           </Link>
         </div>
       </div>
+
+      {/* Open driver-reported problems */}
+      {openProblems.length > 0 && (
+        <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold">
+              {openProblems.length}
+            </span>
+            <h2 className="font-semibold text-red-900">
+              Open problem{openProblems.length === 1 ? '' : 's'} reported by drivers
+            </h2>
+          </div>
+          <ul className="space-y-2">
+            {openProblems.slice(0, 10).map((p) => (
+              <li key={p.id}>
+                <Link
+                  href={`/dispatch/deliveries/${p.delivery_id}`}
+                  className="flex flex-col sm:flex-row sm:justify-between gap-1 bg-white rounded-lg p-3 hover:bg-red-100"
+                >
+                  <span className="text-sm">
+                    <span className="font-medium text-gray-900">{p.tracking_number}</span>
+                    <span className="text-gray-700"> - {p.notes || 'Problem reported'}</span>
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {new Date(p.created_at).toLocaleString()}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Stats grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">

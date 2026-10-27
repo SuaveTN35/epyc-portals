@@ -34,6 +34,7 @@ import {
 import { jobSourceLabel } from '@/lib/new-job';
 import { OfferJobDialog } from '@/components/dispatch/OfferJobDialog';
 import { leftWithLabel, mapsLink } from '@/lib/proof-flow';
+import { openExceptions, resolvedNote } from '@/lib/driver-job';
 
 interface DeliveryDetail {
   id: string;
@@ -147,6 +148,8 @@ export default function DeliveryDetailPage() {
   const [offers, setOffers] = useState<JobOfferSummary[]>([]);
   const [showOfferDialog, setShowOfferDialog] = useState(false);
   const [offerNotice, setOfferNotice] = useState<string | null>(null);
+  const [resolving, setResolving] = useState<string | null>(null);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   useEffect(() => {
     if (params.id) {
@@ -300,6 +303,25 @@ export default function DeliveryDetailPage() {
     setLoading(false);
   };
 
+  const handleResolveException = async (exceptionId: string) => {
+    setResolving(exceptionId);
+    setResolveError(null);
+    const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const { error } = await supabase.from('delivery_events').insert({
+      delivery_id: params.id,
+      event_type: 'exception_resolved',
+      notes: resolvedNote(exceptionId),
+      created_by: user?.id ?? null,
+    });
+    if (error) {
+      setResolveError(`Could not mark resolved: ${error.message}`);
+    } else {
+      await fetchDeliveryDetails();
+    }
+    setResolving(null);
+  };
+
   const handleCancelDelivery = async () => {
     if (!delivery || !confirm('Are you sure you want to cancel this delivery?')) return;
 
@@ -432,6 +454,49 @@ export default function DeliveryDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Open driver-reported problems */}
+      {openExceptions(events).length > 0 && (
+        <div className="bg-red-50 border-2 border-red-300 rounded-xl p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold">
+              {openExceptions(events).length} OPEN
+            </span>
+            <h2 className="font-semibold text-red-900">Driver reported a problem</h2>
+          </div>
+          {openExceptions(events).map((ex) => (
+            <div key={ex.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-white rounded-lg p-3">
+              <div className="text-sm">
+                <p className="font-medium text-gray-900">{ex.notes || 'Problem reported'}</p>
+                <p className="text-gray-600">
+                  {new Date(ex.created_at).toLocaleString()}
+                  {ex.lat != null && ex.lng != null && (
+                    <>
+                      {' - '}
+                      <a
+                        href={mapsLink(ex.lat, ex.lng)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-epyc-primary"
+                      >
+                        view on map
+                      </a>
+                    </>
+                  )}
+                </p>
+              </div>
+              <button
+                onClick={() => handleResolveException(ex.id)}
+                disabled={resolving === ex.id}
+                className="px-3 py-2 bg-red-600 text-white text-sm rounded-lg hover:bg-red-700 disabled:opacity-50"
+              >
+                {resolving === ex.id ? 'Saving...' : 'Mark resolved'}
+              </button>
+            </div>
+          ))}
+          {resolveError && <p className="text-sm text-red-700">{resolveError}</p>}
+        </div>
+      )}
 
       {showOfferDialog && (
         <OfferJobDialog
