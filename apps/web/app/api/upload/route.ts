@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { extensionForContentType } from '@/lib/upload-ext';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -74,7 +75,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const fileExt = (file.name.split('.').pop() || (isPdf ? 'pdf' : 'jpg')).toLowerCase();
+    // Extension comes from the validated content type, never the client's
+    // file name (a name like "x.html" must not become a stored .html object).
+    const fileExt = extensionForContentType(contentType);
     const fileName = `${path}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
 
     const arrayBuffer = await file.arrayBuffer();

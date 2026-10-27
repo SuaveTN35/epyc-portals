@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Upload, X, Check, Loader2, Camera, FileText, Image } from 'lucide-react';
 import { uploadDriverDocument, isImageFile } from '@/lib/upload-client';
 
@@ -31,6 +31,14 @@ export default function DocumentUpload({
   const [preview, setPreview] = useState<string | null>(currentUrl || null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Free the blob URL behind a preview when it is replaced, removed, or the
+  // component unmounts (the cleanup runs with the previous value).
+  useEffect(() => {
+    return () => {
+      if (preview && preview.startsWith('blob:')) URL.revokeObjectURL(preview);
+    };
+  }, [preview]);
 
   const IconComponent = icon === 'camera' ? Camera : icon === 'file' ? FileText : Image;
 
