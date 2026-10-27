@@ -117,3 +117,45 @@ export function packageSummary(d: {
   if (d.package_weight != null) parts.push(`${d.package_weight} lbs`);
   return parts.join(' - ');
 }
+
+/** Shape returned by GET /api/driver/offers (no contact details). */
+export interface DriverOfferPayload {
+  id: string;
+  delivery_id: string;
+  expires_at: string;
+  created_at: string;
+  estimated_payout: number | null;
+  distance_to_pickup_miles: number | null;
+  pickup_city: string;
+  pickup_state: string;
+  delivery_city: string;
+  delivery_state: string;
+  pickup_window_start: string | null;
+  pickup_window_end: string | null;
+  delivery_window_start: string | null;
+  delivery_window_end: string | null;
+  trip_miles: number | null;
+  estimated_minutes: number | null;
+  package_summary: string;
+  vehicle_required: string | null;
+  service_level: string | null;
+  requires_signature: boolean;
+  requires_temperature_control: boolean;
+}
+
+/** "Tue 11/11, 9:00 AM - 11:00 AM" style window text, or null when unset. */
+export function formatWindow(start: string | null, end: string | null): string | null {
+  if (!start && !end) return null;
+  const day = (d: Date) =>
+    d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' });
+  const time = (d: Date) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  const s = start ? new Date(start) : null;
+  const e = end ? new Date(end) : null;
+  if (s && e) {
+    return s.toDateString() === e.toDateString()
+      ? `${day(s)}, ${time(s)} - ${time(e)}`
+      : `${day(s)}, ${time(s)} - ${day(e)}, ${time(e)}`;
+  }
+  if (s) return `From ${day(s)}, ${time(s)}`;
+  return `By ${day(e!)}, ${time(e!)}`;
+}
