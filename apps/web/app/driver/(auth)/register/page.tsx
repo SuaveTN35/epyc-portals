@@ -6,6 +6,7 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Mail, Lock, User, Phone, ArrowRight, Loader2, Car, CheckCircle, Camera, CreditCard, Upload, X } from 'lucide-react';
+import { uploadDriverDocument, isImageFile } from '@/lib/upload-client';
 
 function RegisterForm() {
   const router = useRouter();
@@ -47,14 +48,10 @@ function RegisterForm() {
   ) => {
     const file = e.target.files?.[0];
     if (file) {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        setError('Please upload an image file (JPG, PNG, etc.)');
-        return;
-      }
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        setError('File size must be less than 5MB');
+      // Photos are shrunk before upload (lib/upload-client), so a large phone
+      // photo is fine here. Only reject files that are not photos at all.
+      if (!isImageFile(file)) {
+        setError('Please choose a photo (JPG, PNG, or iPhone photo).');
         return;
       }
       setFile(file);
@@ -80,23 +77,19 @@ function RegisterForm() {
   };
 
   const uploadFile = async (_supabase: ReturnType<typeof createClient>, file: File, path: string): Promise<string> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('path', path);
-
-    const res = await fetch('/api/upload', {
-      method: 'POST',
-      body: formData,
-    });
-
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(`Failed to upload ${path}: ${data.error || 'Upload failed'}`);
+    try {
+      // Storage path, not a public URL. The bucket is private.
+      const { path: storedPath } = await uploadDriverDocument(file, path, { allowPdf: false });
+      return storedPath;
+    } catch (err) {
+      const label =
+        path === 'profile-photos'
+          ? 'profile photo'
+          : path === 'license-front'
+            ? "driver's license (front)"
+            : "driver's license (back)";
+      throw new Error(`Your ${label} did not upload. ${err instanceof Error ? err.message : 'Please try again.'}`);
     }
-
-    // Storage path, not a public URL. The bucket is private.
-    return data.path ?? data.url;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -343,7 +336,7 @@ function RegisterForm() {
               className="hidden"
               onChange={(e) => handleFileChange(e, setProfilePhoto, setProfilePhotoPreview)}
             />
-            <p className="text-xs text-gray-500 mt-2">Clear photo of your face. Max 5MB.</p>
+            <p className="text-xs text-gray-500 mt-2">Clear photo of your face. You can take one now with your camera.</p>
           </div>
         </div>
 

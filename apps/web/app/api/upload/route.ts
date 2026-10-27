@@ -35,8 +35,13 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate file type (images and PDFs - insurance cards and licenses are often PDFs)
-    const isImage = file.type.startsWith('image/');
-    const isPdf = file.type === 'application/pdf';
+    // Some phone pickers send an empty type; fall back to the file extension.
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    const isImage =
+      file.type.startsWith('image/') ||
+      (!file.type && ['jpg', 'jpeg', 'png', 'heic', 'heif', 'webp'].includes(ext));
+    const isPdf = file.type === 'application/pdf' || (!file.type && ext === 'pdf');
+    const contentType = file.type || (isPdf ? 'application/pdf' : ext === 'png' ? 'image/png' : ext === 'heic' || ext === 'heif' ? 'image/heic' : 'image/jpeg');
     if (!isImage && !isPdf) {
       return NextResponse.json(
         { error: 'Only image or PDF files are allowed' },
@@ -78,7 +83,7 @@ export async function POST(request: NextRequest) {
     const { error: uploadError } = await supabaseAdmin.storage
       .from('driver-documents')
       .upload(fileName, buffer, {
-        contentType: file.type,
+        contentType,
         upsert: false,
       });
 

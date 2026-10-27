@@ -159,7 +159,7 @@ export default function DashboardPage() {
           delivery_address,
           service_level,
           created_at,
-          driver:drivers(profiles(full_name))
+          driver:drivers!driver_id(profiles(full_name))
         `)
         .order('created_at', { ascending: false })
         .limit(10);

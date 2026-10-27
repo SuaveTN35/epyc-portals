@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react';
 import { Upload, X, Check, Loader2, Camera, FileText, Image } from 'lucide-react';
+import { uploadDriverDocument, isImageFile } from '@/lib/upload-client';
 
 interface DocumentUploadProps {
   label: string;
@@ -37,49 +38,31 @@ export default function DocumentUpload({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Validate file size (max 10MB)
-    if (file.size > 10 * 1024 * 1024) {
-      setError('File size must be less than 10MB');
-      return;
-    }
-
-    // Validate file type
-    if (!file.type.startsWith('image/') && !file.type.includes('pdf')) {
-      setError('Please upload an image or PDF file');
-      return;
-    }
-
     setError(null);
     setUploading(true);
 
     try {
-      // Create preview for images
-      if (file.type.startsWith('image/')) {
-        const reader = new FileReader();
-        reader.onload = (e) => setPreview(e.target?.result as string);
-        reader.readAsDataURL(file);
-      }
+      // Photos are shrunk in the browser before upload (see lib/upload-client),
+      // which keeps them under Vercel's 4.5 MB request limit.
+      const { path: storedPath, file: sent } = await uploadDriverDocument(file, path, {
+        allowPdf: accept.includes('pdf'),
+      });
 
-      // Upload via the service-role API route (bypasses storage RLS, same
-      // pattern as driver registration). Direct browser uploads are blocked
-      // by default-deny RLS on the driver-documents bucket.
-      const body = new FormData();
-      body.append('file', file);
-      body.append('path', path);
-
-      const res = await fetch('/api/upload', { method: 'POST', body });
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || 'Failed to upload file');
+      if (isImageFile(sent)) {
+        setPreview(URL.createObjectURL(sent));
+      } else {
+        setPreview('pdf');
       }
 
       // Storage path, not a public URL. The driver-documents bucket is private.
-      onUploadComplete(data.path ?? data.url);
+      onUploadComplete(storedPath);
     } catch (err: any) {
       console.error('Upload error:', err);
-      setError(err.message || 'Failed to upload file');
+      setError(err?.message || 'Upload failed. Please try again.');
       setPreview(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     } finally {
       setUploading(false);
     }
@@ -111,7 +94,7 @@ export default function DocumentUpload({
       {preview ? (
         <div className="relative">
           <div className="relative w-full h-48 rounded-lg overflow-hidden bg-gray-100">
-            {preview.startsWith('data:image') || preview.includes('supabase') ? (
+            {preview.startsWith('blob:') || preview.startsWith('data:image') ? (
               <img
                 src={preview}
                 alt={label}
@@ -124,6 +107,8 @@ export default function DocumentUpload({
             )}
             <div className="absolute top-2 right-2 flex gap-2">
               <button
+                type="button"
+                aria-label={`Remove ${label}`}
                 onClick={handleRemove}
                 className="p-1.5 bg-red-500 text-white rounded-full hover:bg-red-600 shadow-lg"
               >
@@ -159,7 +144,7 @@ export default function DocumentUpload({
                 Tap to upload {label.toLowerCase()}
               </span>
               <span className="text-xs text-gray-500 mt-1">
-                JPG, PNG or PDF up to 10MB
+                Take a photo or choose a file
               </span>
             </>
           )}
