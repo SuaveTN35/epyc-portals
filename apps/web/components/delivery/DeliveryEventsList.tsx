@@ -2,7 +2,6 @@
 
 import {
   Clock,
-  Truck,
   Package,
   MapPin,
   CheckCircle,
@@ -10,19 +9,24 @@ import {
   User,
   AlertCircle,
   FileText,
+  CreditCard,
 } from 'lucide-react';
 import type { DeliveryStatus } from '@epyc/shared';
 import { DELIVERY_STATUS_CONFIG } from '@epyc/shared';
+import {
+  eventDetail,
+  eventHeadline,
+  isCustomerVisibleEvent,
+} from '@/lib/customer-delivery';
 
-interface DeliveryEvent {
+// Live delivery_events columns only (no description / metadata columns).
+export interface DeliveryEvent {
   id: string;
-  delivery_id: string;
   event_type: string;
-  status?: DeliveryStatus | null;
-  description: string;
-  metadata?: Record<string, unknown> | null;
+  old_status?: string | null;
+  new_status?: string | null;
+  notes?: string | null;
   created_at: string;
-  created_by?: string | null;
 }
 
 interface DeliveryEventsListProps {
@@ -36,6 +40,11 @@ const EVENT_ICONS: Record<string, React.ComponentType<{ className?: string }>> =
   delivery_completed: CheckCircle,
   delivery_failed: XCircle,
   delivery_cancelled: XCircle,
+  customer_cancelled: XCircle,
+  cancelled_by_dispatch: XCircle,
+  payment_received: CreditCard,
+  payment_failed: CreditCard,
+  payment_refunded: CreditCard,
   location_update: MapPin,
   note_added: FileText,
   default: AlertCircle,
@@ -48,12 +57,19 @@ const EVENT_COLORS: Record<string, string> = {
   delivery_completed: 'bg-green-100 text-green-600',
   delivery_failed: 'bg-red-100 text-red-600',
   delivery_cancelled: 'bg-gray-100 text-gray-600',
+  customer_cancelled: 'bg-gray-100 text-gray-600',
+  cancelled_by_dispatch: 'bg-gray-100 text-gray-600',
+  payment_received: 'bg-green-100 text-green-600',
+  payment_failed: 'bg-red-100 text-red-600',
+  payment_refunded: 'bg-gray-100 text-gray-600',
   location_update: 'bg-cyan-100 text-cyan-600',
   note_added: 'bg-yellow-100 text-yellow-600',
   default: 'bg-gray-100 text-gray-600',
 };
 
-export function DeliveryEventsList({ events }: DeliveryEventsListProps) {
+export function DeliveryEventsList({ events: allEvents }: DeliveryEventsListProps) {
+  const events = allEvents.filter(isCustomerVisibleEvent);
+
   if (events.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow p-6">
@@ -88,8 +104,9 @@ export function DeliveryEventsList({ events }: DeliveryEventsListProps) {
     });
   };
 
-  const getStatusBadge = (status: DeliveryStatus) => {
-    const config = DELIVERY_STATUS_CONFIG[status];
+  const getStatusBadge = (status: string) => {
+    const config = DELIVERY_STATUS_CONFIG[status as DeliveryStatus];
+    if (!config) return null;
     return (
       <span
         className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${config.bgColor} ${config.color}`}
@@ -109,6 +126,7 @@ export function DeliveryEventsList({ events }: DeliveryEventsListProps) {
             const Icon = EVENT_ICONS[event.event_type] || EVENT_ICONS.default;
             const colorClass = EVENT_COLORS[event.event_type] || EVENT_COLORS.default;
             const isLast = eventIdx === events.length - 1;
+            const detail = eventDetail(event);
 
             return (
               <li key={event.id}>
@@ -129,14 +147,10 @@ export function DeliveryEventsList({ events }: DeliveryEventsListProps) {
                     </div>
                     <div className="flex min-w-0 flex-1 justify-between space-x-4 pt-1">
                       <div>
-                        <p className="text-sm text-gray-900">{event.description}</p>
-                        {event.status && (
-                          <div className="mt-1">{getStatusBadge(event.status)}</div>
-                        )}
-                        {event.created_by && (
-                          <p className="mt-1 text-xs text-gray-500">
-                            by {event.created_by}
-                          </p>
+                        <p className="text-sm text-gray-900">{eventHeadline(event)}</p>
+                        {detail && <p className="mt-0.5 text-sm text-gray-600">{detail}</p>}
+                        {event.new_status && (
+                          <div className="mt-1">{getStatusBadge(event.new_status)}</div>
                         )}
                       </div>
                       <div className="whitespace-nowrap text-right text-xs text-gray-500">

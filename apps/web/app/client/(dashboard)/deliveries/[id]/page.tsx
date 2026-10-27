@@ -21,6 +21,7 @@ import {
 } from '@epyc/shared';
 import type { DeliveryStatus, VehicleType, ServiceLevel } from '@epyc/shared';
 import { CancelDeliveryButton } from './CancelDeliveryButton';
+import { canCustomerCancel } from '@/lib/customer-delivery';
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -60,27 +61,19 @@ async function getDelivery(id: string) {
 
   if (error || !delivery) return null;
 
-  // Get proof of delivery if delivered
-  let proofOfDelivery = null;
-  if (delivery.status === 'delivered') {
-    const { data: pod } = await supabase
-      .from('proof_of_delivery')
-      .select('*')
-      .eq('delivery_id', id)
-      .single();
-    proofOfDelivery = pod;
-  }
+  // Proof of delivery is loaded client-side from /api/client/deliveries/:id/proof
+  // (photos need signed URLs; customers have no storage access).
 
-  // Get delivery events
+  // Live delivery_events columns only; internal columns (ip_address,
+  // user_agent, access_reason, created_by) are not sent to the browser.
   const { data: events } = await supabase
     .from('delivery_events')
-    .select('*')
+    .select('id, event_type, old_status, new_status, notes, created_at')
     .eq('delivery_id', id)
     .order('created_at', { ascending: false });
 
   return {
     delivery,
-    proofOfDelivery,
     events: events || [],
   };
 }
@@ -93,7 +86,7 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
     notFound();
   }
 
-  const { delivery, proofOfDelivery, events } = data;
+  const { delivery, events } = data;
   const statusConfig = DELIVERY_STATUS_CONFIG[delivery.status as DeliveryStatus];
   const vehicleConfig = delivery.vehicle_required
     ? VEHICLE_CONFIG[delivery.vehicle_required as VehicleType]
@@ -119,7 +112,8 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
       }
     : null;
 
-  const canCancel = ['booked', 'assigned'].includes(delivery.status);
+  // Customers cancel only before a driver is assigned (P-355).
+  const canCancel = canCustomerCancel(delivery);
 
   return (
     <div className="max-w-5xl mx-auto">
@@ -216,15 +210,15 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
               <div>
                 <p className="text-sm text-gray-500">Weight</p>
                 <p className="font-medium text-gray-900">
-                  {delivery.package_weight ? `${delivery.package_weight} lbs` : '—'}
+                  {delivery.package_weight ? `${delivery.package_weight} lbs` : '-'}
                 </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Dimensions</p>
                 <p className="font-medium text-gray-900">
                   {delivery.package_length && delivery.package_width && delivery.package_height
-                    ? `${delivery.package_length}" × ${delivery.package_width}" × ${delivery.package_height}"`
-                    : '—'}
+                    ? `${delivery.package_length}" x ${delivery.package_width}" x ${delivery.package_height}"`
+                    : '-'}
                 </p>
               </div>
               <div>
@@ -232,7 +226,7 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
                 <p className="font-medium text-gray-900">
                   {vehicleConfig
                     ? `${vehicleConfig.icon} ${vehicleConfig.label}`
-                    : '—'}
+                    : '-'}
                 </p>
               </div>
             </div>
@@ -265,7 +259,7 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
               {delivery.requires_temperature_control && (
                 <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-cyan-100 text-cyan-700">
                   <Thermometer className="h-3 w-3 mr-1" />
-                  {delivery.temperature_min}°C - {delivery.temperature_max}°C
+                  {delivery.temperature_min} C - {delivery.temperature_max} C
                 </span>
               )}
             </div>
@@ -274,7 +268,7 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
           {/* Proof of Delivery */}
           {delivery.status === 'delivered' && (
             <ProofOfDeliveryDisplay
-              pod={proofOfDelivery}
+              deliveryId={delivery.id}
               requiresSignature={delivery.requires_signature}
             />
           )}
@@ -291,10 +285,8 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
             timestamps={{
               booked_at: delivery.booked_at,
               assigned_at: delivery.assigned_at,
-              pickup_started_at: delivery.pickup_started_at,
-              picked_up_at: delivery.picked_up_at,
-              delivery_started_at: delivery.delivery_started_at,
-              delivered_at: delivery.delivered_at,
+              picked_up_at: delivery.actual_pickup_time,
+              delivered_at: delivery.actual_delivery_time,
             }}
           />
 

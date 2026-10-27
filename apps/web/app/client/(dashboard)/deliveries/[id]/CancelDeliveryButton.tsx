@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { XCircle, Loader2, AlertTriangle } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 
 interface CancelDeliveryButtonProps {
   deliveryId: string;
@@ -19,25 +18,28 @@ export function CancelDeliveryButton({ deliveryId }: CancelDeliveryButtonProps) 
     setLoading(true);
     setError(null);
 
-    const supabase = createClient();
-
-    const { error: updateError } = await supabase
-      .from('deliveries')
-      .update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-      })
-      .eq('id', deliveryId);
-
-    if (updateError) {
-      setError(updateError.message);
+    try {
+      // Server route checks ownership and that no driver is assigned yet
+      // (customers cannot update deliveries directly).
+      const res = await fetch(`/api/client/deliveries/${deliveryId}/cancel`, {
+        method: 'POST',
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || 'Could not cancel. Try again.');
+        setLoading(false);
+        return;
+      }
+    } catch {
+      setError('Network error. Check your connection and try again.');
       setLoading(false);
       return;
     }
 
     // Refresh the page to show updated status
-    router.refresh();
+    setLoading(false);
     setShowModal(false);
+    router.refresh();
   };
 
   return (
@@ -74,8 +76,8 @@ export function CancelDeliveryButton({ deliveryId }: CancelDeliveryButtonProps) 
             </div>
 
             <p className="text-gray-600 mb-6">
-              Are you sure you want to cancel this delivery? If a driver has already
-              been assigned, they will be notified of the cancellation.
+              Are you sure you want to cancel this delivery? Once a driver has been
+              assigned, call (818) 217-0070 to cancel instead.
             </p>
 
             {error && (
