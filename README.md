@@ -182,7 +182,7 @@ campaign, and set `TWILIO_MESSAGING_SERVICE_SID`. The campaign sample messages a
 description should match the texts and the consent checkbox above. A toll-free number needs
 toll-free verification instead. Registration review time is set by Twilio and the carriers.
 
-Migration: `packages/supabase/migrations/20261028000200_sms_alerts.sql`.
+Migration: `packages/supabase/migrations/20261028000300_sms_alerts.sql`.
 
 ### Dispatch Portal
 - Real-time delivery dashboard
