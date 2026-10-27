@@ -15,12 +15,25 @@ import {
   Clock,
   Thermometer,
   AlertTriangle,
-  ChevronUp,
   X,
   Loader2,
 } from 'lucide-react';
-import { DELIVERY_STATUS_CONFIG, canDriverUpdateStatus, formatCurrency } from '@epyc/shared';
-import type { Delivery, DeliveryStatus } from '@epyc/shared';
+import { DELIVERY_STATUS_CONFIG, formatCurrency } from '@epyc/shared';
+import type { Delivery } from '@epyc/shared';
+import {
+  LEFT_WITH_OPTIONS,
+  MAX_ITEM_PHOTOS,
+  MAX_PLACEMENT_PHOTOS,
+  MAX_RECIPIENT_PHOTOS,
+  buildDropoffProofRows,
+  buildPickupProofRows,
+  canDriverMoveTo,
+  driverStepFor,
+  validateDropoffProof,
+  validatePickupProof,
+  type LeftWith,
+} from '@/lib/proof-flow';
+import { ProofPhotoCapture, type CapturedPhoto } from '@/components/driver/ProofPhotoCapture';
 
 export default function DeliveryDetailPage() {
   const params = useParams();
@@ -30,7 +43,6 @@ export default function DeliveryDetailPage() {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
-  const [showPODSheet, setShowPODSheet] = useState(false);
   const [showTempSheet, setShowTempSheet] = useState(false);
   const [showNavSheet, setShowNavSheet] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -73,57 +85,50 @@ export default function DeliveryDetailPage() {
     };
   }, [deliveryId]);
 
-  const updateStatus = async (newStatus: DeliveryStatus) => {
-    if (!delivery || !canDriverUpdateStatus(delivery.status, newStatus)) return;
-
-    setUpdating(true);
-
-    const updates: Partial<Delivery> = { status: newStatus };
-
-    // Add timestamp for specific status changes
-    if (newStatus === 'picked_up') {
-      updates.actual_pickup_time = new Date().toISOString();
-    } else if (newStatus === 'delivered') {
-      updates.actual_delivery_time = new Date().toISOString();
-      setShowPODSheet(true);
-      setUpdating(false);
+  /**
+   * "I've arrived" buttons: move the job forward and log an arrival event with
+   * GPS when the phone allows it. The status-change trigger also logs the
+   * transition; this event adds where the driver was.
+   */
+  const arrive = async (target: 'arrived_pickup' | 'arrived_delivery') => {
+    if (!delivery) return;
+    if (!canDriverMoveTo(delivery.status, target)) {
+      setStatusError(`This job cannot move from ${delivery.status} to ${target}. Call dispatch.`);
       return;
     }
 
+    setUpdating(true);
     setStatusError(null);
+    const gps = await getCurrentPosition();
+    const { data: { user } } = await supabase.auth.getUser();
+
     const { error } = await supabase
       .from('deliveries')
-      .update(updates)
+      .update({ status: target })
       .eq('id', deliveryId);
 
     if (error) {
       setStatusError(`Could not update status: ${error.message}`);
+      setUpdating(false);
+      return;
+    }
+
+    const { error: eventError } = await supabase.from('delivery_events').insert({
+      delivery_id: deliveryId,
+      event_type: target,
+      old_status: delivery.status,
+      new_status: target,
+      lat: gps?.lat ?? null,
+      lng: gps?.lng ?? null,
+      notes: gps ? null : 'Location not available',
+      created_by: user?.id ?? null,
+    });
+    if (eventError) {
+      setStatusError(`Arrival saved, but the arrival log failed: ${eventError.message}`);
     }
 
     setUpdating(false);
     fetchDelivery();
-  };
-
-  const getNextStatus = (): { status: DeliveryStatus; label: string } | null => {
-    if (!delivery) return null;
-
-    const statusFlow: Record<DeliveryStatus, { status: DeliveryStatus; label: string } | null> = {
-      assigned: { status: 'en_route_pickup', label: 'Start Navigation to Pickup' },
-      en_route_pickup: { status: 'arrived_pickup', label: 'Arrived at Pickup' },
-      arrived_pickup: { status: 'picked_up', label: 'Package Picked Up' },
-      picked_up: { status: 'en_route_delivery', label: 'Start Navigation to Delivery' },
-      en_route_delivery: { status: 'arrived_delivery', label: 'Arrived at Delivery' },
-      arrived_delivery: { status: 'delivered', label: 'Complete Delivery' },
-      // Terminal states
-      quote_requested: null,
-      quoted: null,
-      booked: null,
-      delivered: null,
-      cancelled: null,
-      failed: null,
-    };
-
-    return statusFlow[delivery.status];
   };
 
   const getNavigationAddress = () => {
@@ -200,7 +205,7 @@ export default function DeliveryDetailPage() {
 
   const statusConfig = DELIVERY_STATUS_CONFIG[delivery.status];
   const isPickupPhase = ['assigned', 'en_route_pickup', 'arrived_pickup'].includes(delivery.status);
-  const nextAction = getNextStatus();
+  const step = driverStepFor(delivery.status);
 
   const currentLocation = isPickupPhase
     ? {
@@ -359,25 +364,58 @@ export default function DeliveryDetailPage() {
         )}
       </div>
 
-      {/* Action Button */}
-      {nextAction && (
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-white border-t border-gray-200 safe-area-bottom">
-          <button
-            onClick={() => updateStatus(nextAction.status)}
-            disabled={updating}
-            className="w-full py-4 bg-epyc-primary text-white rounded-xl font-semibold text-lg flex items-center justify-center touch-target disabled:opacity-50"
-          >
-            {updating ? (
-              <Loader2 className="h-6 w-6 animate-spin" />
-            ) : (
-              <>
-                <ChevronUp className="h-6 w-6 mr-2" />
-                {nextAction.label}
-              </>
-            )}
-          </button>
-        </div>
-      )}
+      {/* Next step */}
+      <div className="bg-white mx-4 mt-4 rounded-xl shadow-sm p-4">
+        {(step === 'to_pickup' || step === 'to_dropoff') && (
+          <div className="space-y-3">
+            <h3 className="font-semibold text-gray-900">
+              {step === 'to_pickup' ? 'Step 1: Go to pickup' : 'Step 3: Go to drop-off'}
+            </h3>
+            <button
+              onClick={() => setShowNavSheet(true)}
+              className="w-full py-4 border-2 border-epyc-primary text-epyc-primary rounded-xl font-semibold text-lg flex items-center justify-center touch-target"
+            >
+              <Navigation className="h-6 w-6 mr-2" />
+              {step === 'to_pickup' ? 'Navigate to pickup' : 'Navigate to drop-off'}
+            </button>
+            <button
+              onClick={() => arrive(step === 'to_pickup' ? 'arrived_pickup' : 'arrived_delivery')}
+              disabled={updating}
+              className="w-full py-4 bg-epyc-primary text-white rounded-xl font-semibold text-lg flex items-center justify-center touch-target disabled:opacity-50"
+            >
+              {updating ? (
+                <Loader2 className="h-6 w-6 animate-spin" />
+              ) : (
+                <>
+                  <MapPin className="h-6 w-6 mr-2" />
+                  {step === 'to_pickup' ? "I've arrived at pickup" : "I've arrived at drop-off"}
+                </>
+              )}
+            </button>
+          </div>
+        )}
+
+        {step === 'pickup_proof' && (
+          <PickupProofPanel deliveryId={deliveryId} onDone={fetchDelivery} />
+        )}
+
+        {step === 'dropoff_proof' && (
+          <DropoffProofPanel
+            deliveryId={deliveryId}
+            requiresSignature={!!delivery.requires_signature}
+            onDone={() => router.push('/driver/earnings')}
+          />
+        )}
+
+        {step === 'done' && (
+          <div className="text-center py-2">
+            <CheckCircle className="h-10 w-10 text-green-500 mx-auto mb-2" />
+            <p className="font-medium text-gray-900">
+              {delivery.status === 'delivered' ? 'Delivery complete' : statusConfig.label}
+            </p>
+          </div>
+        )}
+      </div>
 
       {statusError && (
         <div className="fixed top-4 left-4 right-4 z-40 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 shadow">
@@ -386,19 +424,6 @@ export default function DeliveryDetailPage() {
             Dismiss
           </button>
         </div>
-      )}
-
-      {/* POD Bottom Sheet */}
-      {showPODSheet && (
-        <PODBottomSheet
-          deliveryId={deliveryId}
-          requiresSignature={delivery.requires_signature}
-          onClose={() => setShowPODSheet(false)}
-          onComplete={() => {
-            setShowPODSheet(false);
-            router.push('/driver/earnings');
-          }}
-        />
       )}
 
       {/* Temperature Log Sheet */}
@@ -550,281 +575,349 @@ function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void
   );
 }
 
-function PODBottomSheet({
-  deliveryId,
-  requiresSignature,
-  onClose,
-  onComplete,
-}: {
-  deliveryId: string;
-  requiresSignature: boolean;
-  onClose: () => void;
-  onComplete: () => void;
-}) {
-  const [step, setStep] = useState<'photo' | 'signature' | 'confirm'>('photo');
-  // Storage path inside the private delivery-photos bucket.
-  const [photoPath, setPhotoPath] = useState<string | null>(null);
-  // Local preview only; the bucket is private so there is no public URL.
-  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
-  const [uploading, setUploading] = useState(false);
-  const [signatureData, setSignatureData] = useState<string | null>(null);
-  const [recipientName, setRecipientName] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+function ProofError({ message }: { message: string | null }) {
+  if (!message) return null;
+  return (
+    <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start">
+      <AlertTriangle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0" />
+      <p className="text-sm text-red-700">{message}</p>
+    </div>
+  );
+}
+
+/**
+ * Step 2: at pickup. Item photos (1-4) and the receipt or bill of lading
+ * (or "No receipt given" with a note). Proof rows are saved first; only then
+ * is the job marked picked_up. The database refuses picked_up without them.
+ */
+function PickupProofPanel({ deliveryId, onDone }: { deliveryId: string; onDone: () => void }) {
+  const supabase = createClient();
+  const [itemPhotos, setItemPhotos] = useState<CapturedPhoto[]>([]);
+  const [receiptPhotos, setReceiptPhotos] = useState<CapturedPhoto[]>([]);
+  const [noReceipt, setNoReceipt] = useState(false);
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [proofSaved, setProofSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const supabase = createClient();
-
-  useEffect(() => {
-    return () => {
-      if (photoPreview) URL.revokeObjectURL(photoPreview);
-    };
-  }, [photoPreview]);
-
-  const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    setError(null);
-    setUploading(true);
-    if (photoPreview) URL.revokeObjectURL(photoPreview);
-    setPhotoPreview(URL.createObjectURL(file));
-
-    // Path must start with the delivery id: the storage policy only lets the
-    // assigned driver write under <delivery_id>/.
-    const fileName = `${deliveryId}/${Date.now()}.jpg`;
-    const { error: uploadError } = await supabase.storage
-      .from('delivery-photos')
-      .upload(fileName, file, { contentType: file.type || 'image/jpeg', upsert: false });
-
-    setUploading(false);
-    // Allow re-selecting the same file after an error.
-    e.target.value = '';
-
-    if (uploadError) {
-      setPhotoPath(null);
-      setError(`Photo upload failed: ${uploadError.message}. Check your signal and try again.`);
-      return;
-    }
-
-    setPhotoPath(fileName);
+  const input = {
+    itemPhotos: itemPhotos.map((p) => p.path),
+    receiptPhotos: receiptPhotos.map((p) => p.path),
+    noReceipt,
+    note,
   };
 
-  const handleSubmit = async () => {
+  const complete = async () => {
     setError(null);
-
-    if (!photoPath) {
-      setError('Take a photo of the package before completing.');
-      setStep('photo');
-      return;
-    }
-    if (requiresSignature && (!signatureData || !recipientName.trim())) {
-      setError('A signature and the recipient name are required for this delivery.');
-      setStep('signature');
+    const problem = validatePickupProof(input);
+    if (problem) {
+      setError(problem);
       return;
     }
 
-    setSubmitting(true);
-    const gps = await getCurrentPosition();
+    setSaving(true);
     const capturedAt = new Date().toISOString();
 
-    const podRows: Record<string, unknown>[] = [
-      {
-        delivery_id: deliveryId,
-        type: 'photo',
-        photo_url: photoPath,
-        recipient_name: recipientName.trim() || null,
-        lat: gps?.lat ?? null,
-        lng: gps?.lng ?? null,
-        captured_at: capturedAt,
-      },
-    ];
-    if (signatureData) {
-      podRows.push({
-        delivery_id: deliveryId,
-        type: 'signature',
-        signature_data: signatureData,
-        recipient_name: recipientName.trim() || null,
-        lat: gps?.lat ?? null,
-        lng: gps?.lng ?? null,
-        captured_at: capturedAt,
-      });
-    }
-
-    // Proof first. The job is only marked delivered once proof is saved.
-    const { error: podError } = await supabase.from('proof_of_delivery').insert(podRows);
-    if (podError) {
-      setSubmitting(false);
-      setError(`Could not save proof of delivery: ${podError.message}. The delivery is NOT complete yet; try again.`);
-      return;
+    // Proof first. A retry after a failed status update does not re-insert.
+    if (!proofSaved) {
+      const gps = await getCurrentPosition();
+      const rows = buildPickupProofRows(deliveryId, input, gps, capturedAt);
+      const { error: podError } = await supabase.from('proof_of_delivery').insert(rows);
+      if (podError) {
+        setSaving(false);
+        setError(`Could not save pickup proof: ${podError.message}. Pickup is NOT complete yet; try again.`);
+        return;
+      }
+      setProofSaved(true);
     }
 
     const { error: statusError } = await supabase
       .from('deliveries')
-      .update({
-        status: 'delivered',
-        actual_delivery_time: capturedAt,
-      })
+      .update({ status: 'picked_up', actual_pickup_time: capturedAt })
       .eq('id', deliveryId);
 
+    setSaving(false);
     if (statusError) {
-      setSubmitting(false);
-      setError(`Proof saved, but marking the job delivered failed: ${statusError.message}. Try again or call dispatch.`);
+      setError(`Proof saved, but marking the job picked up failed: ${statusError.message}. Tap again or call dispatch.`);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <div className="space-y-5">
+      <h3 className="font-semibold text-gray-900">Step 2: Pickup proof</h3>
+      <ProofError message={error} />
+
+      <ProofPhotoCapture
+        deliveryId={deliveryId}
+        stage="pickup"
+        kind="item"
+        label="Photo of the item(s)"
+        hint="Show every piece you are taking."
+        required
+        max={MAX_ITEM_PHOTOS}
+        photos={itemPhotos}
+        onChange={setItemPhotos}
+        disabled={saving || proofSaved}
+      />
+
+      {!noReceipt && (
+        <ProofPhotoCapture
+          deliveryId={deliveryId}
+          stage="pickup"
+          kind="receipt"
+          label="Photo of the receipt / bill of lading"
+          required
+          max={2}
+          photos={receiptPhotos}
+          onChange={setReceiptPhotos}
+          disabled={saving || proofSaved}
+        />
+      )}
+
+      <label className="flex items-center gap-3 text-sm text-gray-800">
+        <input
+          type="checkbox"
+          className="h-5 w-5 rounded border-gray-300"
+          checked={noReceipt}
+          disabled={saving || proofSaved}
+          onChange={(e) => setNoReceipt(e.target.checked)}
+        />
+        No receipt given
+      </label>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Note{noReceipt && <span className="text-red-500 ml-1">*</span>}
+        </label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          disabled={saving || proofSaved}
+          rows={2}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+          placeholder={noReceipt ? 'Why was there no receipt?' : 'Optional'}
+        />
+      </div>
+
+      <button
+        onClick={complete}
+        disabled={saving}
+        className="w-full py-4 bg-epyc-primary text-white rounded-xl font-semibold text-lg flex items-center justify-center touch-target disabled:opacity-50"
+      >
+        {saving ? <Loader2 className="h-6 w-6 animate-spin" /> : 'Pickup complete'}
+      </button>
+    </div>
+  );
+}
+
+/**
+ * Step 4: at drop-off. Recipient name, where it was left, placement photo
+ * (required), recipient photo (optional), and a signature when the job
+ * requires one (or "Left without signature" with a note). Proof rows are
+ * saved first; only then is the job marked delivered.
+ */
+function DropoffProofPanel({
+  deliveryId,
+  requiresSignature,
+  onDone,
+}: {
+  deliveryId: string;
+  requiresSignature: boolean;
+  onDone: () => void;
+}) {
+  const supabase = createClient();
+  const [recipientName, setRecipientName] = useState('');
+  const [leftWith, setLeftWith] = useState<LeftWith | ''>('');
+  const [note, setNote] = useState('');
+  const [placementPhotos, setPlacementPhotos] = useState<CapturedPhoto[]>([]);
+  const [recipientPhotos, setRecipientPhotos] = useState<CapturedPhoto[]>([]);
+  const [signature, setSignature] = useState<string | null>(null);
+  const [noSignature, setNoSignature] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [proofSaved, setProofSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const input = {
+    recipientName,
+    leftWith,
+    note,
+    placementPhotos: placementPhotos.map((p) => p.path),
+    recipientPhotos: recipientPhotos.map((p) => p.path),
+    signature,
+    requiresSignature,
+    noSignature,
+  };
+
+  const complete = async () => {
+    setError(null);
+    const problem = validateDropoffProof(input);
+    if (problem) {
+      setError(problem);
       return;
     }
 
-    // Free the driver for the next job. Best effort: dispatch can also clear it.
+    setSaving(true);
+    const capturedAt = new Date().toISOString();
+
+    if (!proofSaved) {
+      const gps = await getCurrentPosition();
+      const rows = buildDropoffProofRows(deliveryId, input, gps, capturedAt);
+      const { error: podError } = await supabase.from('proof_of_delivery').insert(rows);
+      if (podError) {
+        setSaving(false);
+        setError(`Could not save proof of delivery: ${podError.message}. The delivery is NOT complete yet; try again.`);
+        return;
+      }
+      setProofSaved(true);
+    }
+
+    const { error: statusError } = await supabase
+      .from('deliveries')
+      .update({ status: 'delivered', actual_delivery_time: capturedAt })
+      .eq('id', deliveryId);
+
+    if (statusError) {
+      setSaving(false);
+      setError(`Proof saved, but marking the job delivered failed: ${statusError.message}. Tap again or call dispatch.`);
+      return;
+    }
+
+    // Free the driver for the next job.
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
-      await supabase
+      const { error: releaseError } = await supabase
         .from('drivers')
         .update({ current_delivery_id: null, last_active_at: capturedAt })
         .eq('profile_id', user.id)
         .eq('current_delivery_id', deliveryId);
+      if (releaseError) {
+        setSaving(false);
+        setError(`Delivered. Could not clear your current job: ${releaseError.message}. Tell dispatch.`);
+        return;
+      }
     }
 
-    setSubmitting(false);
-    onComplete();
+    setSaving(false);
+    onDone();
   };
 
+  const locked = saving || proofSaved;
+
   return (
-    <div className="fixed inset-0 bg-black/50 z-50">
-      <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl slide-up safe-area-bottom max-h-[90vh] overflow-y-auto">
-        <div className="p-4 border-b border-gray-100">
-          <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Proof of Delivery</h3>
-            <button onClick={onClose} className="p-2" disabled={submitting}>
-              <X className="h-6 w-6 text-gray-400" />
-            </button>
-          </div>
-        </div>
+    <div className="space-y-5">
+      <h3 className="font-semibold text-gray-900">Step 4: Drop-off proof</h3>
+      <ProofError message={error} />
 
-        <div className="p-4">
-          {error && (
-            <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start">
-              <AlertTriangle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0" />
-              <p className="text-sm text-red-700">{error}</p>
-            </div>
-          )}
-
-          {step === 'photo' && (
-            <div className="text-center">
-              <div className="bg-gray-100 rounded-xl p-8 mb-4">
-                {photoPreview ? (
-                  <img src={photoPreview} alt="POD" className="w-full rounded-lg" />
-                ) : (
-                  <Camera className="h-16 w-16 text-gray-400 mx-auto" />
-                )}
-              </div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handlePhotoCapture}
-                className="hidden"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-                className="w-full py-3 bg-epyc-primary text-white rounded-lg font-medium flex items-center justify-center disabled:opacity-50"
-              >
-                {uploading ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : photoPreview ? (
-                  'Retake Photo'
-                ) : (
-                  'Take Photo of Package'
-                )}
-              </button>
-              {photoPath && !uploading && (
-                <button
-                  onClick={() => setStep(requiresSignature ? 'signature' : 'confirm')}
-                  className="w-full mt-3 py-3 border border-epyc-primary text-epyc-primary rounded-lg font-medium"
-                >
-                  Continue
-                </button>
-              )}
-            </div>
-          )}
-
-          {step === 'signature' && (
-            <div>
-              <div className="mb-4">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Recipient Name
-                </label>
-                <input
-                  type="text"
-                  value={recipientName}
-                  onChange={(e) => setRecipientName(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  placeholder="Enter recipient's name"
-                  autoComplete="off"
-                />
-              </div>
-              <div className="mb-4">
-                <SignaturePad onChange={setSignatureData} />
-              </div>
-              <button
-                onClick={() => {
-                  if (!signatureData) {
-                    setError('Have the recipient sign in the box first.');
-                    return;
-                  }
-                  if (!recipientName.trim()) {
-                    setError('Enter the recipient name.');
-                    return;
-                  }
-                  setError(null);
-                  setStep('confirm');
-                }}
-                className="w-full py-3 bg-epyc-primary text-white rounded-lg font-medium"
-              >
-                Confirm Signature
-              </button>
-            </div>
-          )}
-
-          {step === 'confirm' && (
-            <div>
-              <div className="bg-green-50 rounded-xl p-4 mb-4 text-center">
-                <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-2" />
-                <p className="font-medium text-green-800">Ready to Complete</p>
-                <p className="text-sm text-green-600">
-                  Photo {signatureData ? '& signature' : ''} captured
-                </p>
-              </div>
-              {!requiresSignature && (
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Received by (optional)
-                  </label>
-                  <input
-                    type="text"
-                    value={recipientName}
-                    onChange={(e) => setRecipientName(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                    placeholder="Name, or left at door"
-                    autoComplete="off"
-                  />
-                </div>
-              )}
-              <button
-                onClick={handleSubmit}
-                disabled={submitting}
-                className="w-full py-3 bg-epyc-primary text-white rounded-lg font-medium flex items-center justify-center"
-              >
-                {submitting ? (
-                  <Loader2 className="h-5 w-5 animate-spin" />
-                ) : (
-                  'Complete Delivery'
-                )}
-              </button>
-            </div>
-          )}
-        </div>
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Recipient name<span className="text-red-500 ml-1">*</span>
+        </label>
+        <input
+          type="text"
+          value={recipientName}
+          onChange={(e) => setRecipientName(e.target.value)}
+          disabled={locked}
+          className="w-full px-3 py-3 border border-gray-300 rounded-lg"
+          placeholder="Who received it"
+          autoComplete="off"
+        />
       </div>
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Left with / where left<span className="text-red-500 ml-1">*</span>
+        </label>
+        <select
+          value={leftWith}
+          onChange={(e) => setLeftWith(e.target.value as LeftWith | '')}
+          disabled={locked}
+          className="w-full px-3 py-3 border border-gray-300 rounded-lg bg-white"
+        >
+          <option value="">Choose one</option>
+          {LEFT_WITH_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <ProofPhotoCapture
+        deliveryId={deliveryId}
+        stage="delivery"
+        kind="placement"
+        label="Photo showing where it was left"
+        required
+        max={MAX_PLACEMENT_PHOTOS}
+        photos={placementPhotos}
+        onChange={setPlacementPhotos}
+        disabled={locked}
+      />
+
+      <ProofPhotoCapture
+        deliveryId={deliveryId}
+        stage="delivery"
+        kind="recipient"
+        label="Photo of who it was left with (optional)"
+        max={MAX_RECIPIENT_PHOTOS}
+        photos={recipientPhotos}
+        onChange={setRecipientPhotos}
+        disabled={locked}
+      />
+
+      {!noSignature && (
+        <div>
+          <p className="text-sm font-medium text-gray-900 mb-1">
+            Signature
+            {requiresSignature ? (
+              <span className="text-red-500 ml-1">*</span>
+            ) : (
+              <span className="ml-1 text-xs font-normal text-gray-500">(optional)</span>
+            )}
+          </p>
+          <SignaturePad onChange={setSignature} />
+        </div>
+      )}
+
+      {requiresSignature && (
+        <label className="flex items-center gap-3 text-sm text-gray-800">
+          <input
+            type="checkbox"
+            className="h-5 w-5 rounded border-gray-300"
+            checked={noSignature}
+            disabled={locked}
+            onChange={(e) => {
+              setNoSignature(e.target.checked);
+              if (e.target.checked) setSignature(null);
+            }}
+          />
+          Left without signature
+        </label>
+      )}
+
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Note{noSignature && <span className="text-red-500 ml-1">*</span>}
+        </label>
+        <textarea
+          value={note}
+          onChange={(e) => setNote(e.target.value)}
+          disabled={locked}
+          rows={2}
+          className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+          placeholder={noSignature ? 'Why was there no signature?' : 'Optional'}
+        />
+      </div>
+
+      <button
+        onClick={complete}
+        disabled={saving}
+        className="w-full py-4 bg-epyc-primary text-white rounded-xl font-semibold text-lg flex items-center justify-center touch-target disabled:opacity-50"
+      >
+        {saving ? <Loader2 className="h-6 w-6 animate-spin" /> : 'Complete delivery'}
+      </button>
     </div>
   );
 }

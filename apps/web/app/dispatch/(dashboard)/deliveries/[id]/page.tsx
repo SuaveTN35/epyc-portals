@@ -33,6 +33,7 @@ import {
 } from '@/lib/delivery-status';
 import { jobSourceLabel } from '@/lib/new-job';
 import { OfferJobDialog } from '@/components/dispatch/OfferJobDialog';
+import { leftWithLabel, mapsLink } from '@/lib/proof-flow';
 
 interface DeliveryDetail {
   id: string;
@@ -109,16 +110,28 @@ interface TemperatureLog {
   recorded_at: string;
 }
 
-// proof_of_delivery stores one row per capture type (photo, signature, ...).
-// This is the merged view dispatch shows.
-interface ProofOfDelivery {
-  photo_signed_url: string | null;
+// proof_of_delivery stores one row per capture (photo, signature, ...),
+// tagged with stage (pickup | delivery) and photo_kind. Dispatch shows one
+// section per stage.
+interface ProofPhoto {
+  kind: string | null;
+  url: string | null;
+}
+
+interface StageProof {
+  photos: ProofPhoto[];
   signature_data: string | null;
   recipient_name: string | null;
-  notes: string | null;
+  recipient_relation: string | null;
+  notes: string[];
   lat: number | null;
   lng: number | null;
   captured_at: string | null;
+}
+
+interface ProofByStage {
+  pickup: StageProof | null;
+  delivery: StageProof | null;
 }
 
 export default function DeliveryDetailPage() {
@@ -128,7 +141,7 @@ export default function DeliveryDetailPage() {
   const [delivery, setDelivery] = useState<DeliveryDetail | null>(null);
   const [events, setEvents] = useState<DeliveryEvent[]>([]);
   const [temperatureLogs, setTemperatureLogs] = useState<TemperatureLog[]>([]);
-  const [pod, setPod] = useState<ProofOfDelivery | null>(null);
+  const [pod, setPod] = useState<ProofByStage>({ pickup: null, delivery: null });
   const [cancelling, setCancelling] = useState(false);
   const [justCreated, setJustCreated] = useState(false);
   const [offers, setOffers] = useState<JobOfferSummary[]>([]);
@@ -237,45 +250,52 @@ export default function DeliveryDetailPage() {
       setTemperatureLogs(tempData);
     }
 
-    // Fetch proof of delivery (one row per capture type)
+    // Fetch proof (one row per capture), grouped by stage
     const { data: podRows } = await supabase
       .from('proof_of_delivery')
-      .select('type, photo_url, signature_data, recipient_name, notes, lat, lng, captured_at')
+      .select(
+        'type, stage, photo_kind, photo_url, signature_data, recipient_name, recipient_relation, notes, lat, lng, captured_at'
+      )
       .eq('delivery_id', params.id)
       .order('captured_at', { ascending: true });
 
-    if (podRows && podRows.length > 0) {
-      const photoRow = podRows.find((r: any) => r.type === 'photo' && r.photo_url);
-      const sigRow = podRows.find((r: any) => r.type === 'signature' && r.signature_data);
-      const withName = podRows.find((r: any) => r.recipient_name);
-      const withNotes = podRows.find((r: any) => r.notes);
-      const withGps = podRows.find((r: any) => r.lat != null && r.lng != null);
+    // photo_url holds a path in the private delivery-photos bucket.
+    const signPhoto = async (value: string): Promise<string | null> => {
+      if (/^https?:\/\//.test(value)) return value;
+      const { data: signed } = await supabase.storage
+        .from('delivery-photos')
+        .createSignedUrl(value, 300);
+      return signed?.signedUrl ?? null;
+    };
 
-      // photo_url holds a path in the private delivery-photos bucket.
-      let photoSignedUrl: string | null = null;
-      if (photoRow?.photo_url) {
-        if (/^https?:\/\//.test(photoRow.photo_url)) {
-          photoSignedUrl = photoRow.photo_url;
-        } else {
-          const { data: signed } = await supabase.storage
-            .from('delivery-photos')
-            .createSignedUrl(photoRow.photo_url, 300);
-          photoSignedUrl = signed?.signedUrl ?? null;
+    const buildStage = async (rows: any[]): Promise<StageProof | null> => {
+      const relevant = rows.filter((r) => r.type !== 'temperature');
+      if (relevant.length === 0) return null;
+      const photos: ProofPhoto[] = [];
+      for (const r of relevant) {
+        if (r.type === 'photo' && r.photo_url) {
+          photos.push({ kind: r.photo_kind ?? null, url: await signPhoto(r.photo_url) });
         }
       }
-
-      setPod({
-        photo_signed_url: photoSignedUrl,
-        signature_data: sigRow?.signature_data ?? null,
-        recipient_name: withName?.recipient_name ?? null,
-        notes: withNotes?.notes ?? null,
+      const withGps = relevant.find((r) => r.lat != null && r.lng != null);
+      return {
+        photos,
+        signature_data: relevant.find((r) => r.type === 'signature')?.signature_data ?? null,
+        recipient_name: relevant.find((r) => r.recipient_name)?.recipient_name ?? null,
+        recipient_relation: relevant.find((r) => r.recipient_relation)?.recipient_relation ?? null,
+        notes: relevant.map((r) => r.notes).filter(Boolean),
         lat: withGps?.lat ?? null,
         lng: withGps?.lng ?? null,
-        captured_at: podRows[podRows.length - 1].captured_at ?? null,
-      });
-    } else {
-      setPod(null);
-    }
+        captured_at: relevant[relevant.length - 1].captured_at ?? null,
+      };
+    };
+
+    const rows = podRows || [];
+    setPod({
+      // Rows saved before the stage column existed default to 'delivery'.
+      pickup: await buildStage(rows.filter((r: any) => r.stage === 'pickup')),
+      delivery: await buildStage(rows.filter((r: any) => (r.stage ?? 'delivery') === 'delivery')),
+    });
 
     setLoading(false);
   };
@@ -574,44 +594,38 @@ export default function DeliveryDetailPage() {
             )}
           </div>
 
-          {/* Proof of Delivery */}
-          {pod && (
+          {/* Proof: pickup and drop-off */}
+          {pod.pickup && <ProofSection title="Pickup Proof" proof={pod.pickup} />}
+          {pod.delivery && <ProofSection title="Drop-off Proof" proof={pod.delivery} />}
+
+          {/* Arrivals */}
+          {events.some((e) => e.event_type === 'arrived_pickup' || e.event_type === 'arrived_delivery') && (
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Proof of Delivery</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {pod.photo_signed_url && (
-                  <div>
-                    <p className="text-sm text-gray-500 mb-2">Photo</p>
-                    <img
-                      src={pod.photo_signed_url}
-                      alt="Delivery photo"
-                      className="w-full h-48 object-cover rounded-lg"
-                    />
-                  </div>
-                )}
-                {pod.signature_data && (
-                  <div>
-                    <p className="text-sm text-gray-500 mb-2">Signature</p>
-                    <img
-                      src={pod.signature_data}
-                      alt="Recipient signature"
-                      className="w-full h-48 object-contain bg-gray-50 rounded-lg"
-                    />
-                  </div>
-                )}
-              </div>
-              <div className="mt-4">
-                <p className="text-sm text-gray-500">Received by</p>
-                <p className="font-medium">{pod.recipient_name || 'Not recorded'}</p>
-                {pod.notes && (
-                  <p className="text-sm text-gray-600 mt-1">{pod.notes}</p>
-                )}
-                {pod.lat != null && pod.lng != null && (
-                  <p className="text-xs text-gray-500 mt-1">
-                    GPS {pod.lat.toFixed(5)}, {pod.lng.toFixed(5)}
-                  </p>
-                )}
-              </div>
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Arrivals</h2>
+              <ul className="space-y-2 text-sm">
+                {events
+                  .filter((e) => e.event_type === 'arrived_pickup' || e.event_type === 'arrived_delivery')
+                  .map((e) => (
+                    <li key={e.id} className="flex flex-wrap justify-between gap-2">
+                      <span className="font-medium text-gray-900">
+                        {e.event_type === 'arrived_pickup' ? 'Arrived at pickup' : 'Arrived at drop-off'}
+                      </span>
+                      <span className="text-gray-600">{new Date(e.created_at).toLocaleString()}</span>
+                      {e.lat != null && e.lng != null ? (
+                        <a
+                          href={mapsLink(e.lat, e.lng)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-epyc-primary hover:text-blue-700"
+                        >
+                          GPS {e.lat.toFixed(5)}, {e.lng.toFixed(5)} - view on map
+                        </a>
+                      ) : (
+                        <span className="text-gray-400">No GPS</span>
+                      )}
+                    </li>
+                  ))}
+              </ul>
             </div>
           )}
 
@@ -644,9 +658,14 @@ export default function DeliveryDetailPage() {
                       {new Date(event.created_at).toLocaleString()}
                     </p>
                     {event.lat != null && event.lng != null && (
-                      <p className="text-xs text-gray-500">
-                        {event.lat.toFixed(5)}, {event.lng.toFixed(5)}
-                      </p>
+                      <a
+                        href={mapsLink(event.lat, event.lng)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-epyc-primary hover:text-blue-700"
+                      >
+                        {event.lat.toFixed(5)}, {event.lng.toFixed(5)} - view on map
+                      </a>
                     )}
                   </div>
                 </div>
@@ -820,6 +839,98 @@ export default function DeliveryDetailPage() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+const PHOTO_KIND_LABEL: Record<string, string> = {
+  item: 'Item',
+  receipt: 'Receipt / BOL',
+  placement: 'Where left',
+  recipient: 'Left with',
+  other: 'Other',
+};
+
+function ProofSection({ title, proof }: { title: string; proof: StageProof }) {
+  return (
+    <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-4">{title}</h2>
+      {proof.photos.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {proof.photos.map((photo, i) => (
+            <div key={i}>
+              <p className="text-xs text-gray-500 mb-1">
+                {PHOTO_KIND_LABEL[photo.kind ?? ''] ?? 'Photo'}
+              </p>
+              {photo.url ? (
+                <a href={photo.url} target="_blank" rel="noopener noreferrer">
+                  <img
+                    src={photo.url}
+                    alt={PHOTO_KIND_LABEL[photo.kind ?? ''] ?? 'Proof photo'}
+                    className="w-full h-36 object-cover rounded-lg"
+                  />
+                </a>
+              ) : (
+                <div className="w-full h-36 bg-gray-100 rounded-lg flex items-center justify-center text-xs text-gray-500">
+                  Could not load photo
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {proof.signature_data && (
+        <div className="mt-4">
+          <p className="text-sm text-gray-500 mb-2">Signature</p>
+          <img
+            src={proof.signature_data}
+            alt="Recipient signature"
+            className="w-full max-w-sm h-32 object-contain bg-gray-50 rounded-lg"
+          />
+        </div>
+      )}
+      <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+        {proof.recipient_name && (
+          <div>
+            <p className="text-gray-500">Received by</p>
+            <p className="font-medium">{proof.recipient_name}</p>
+          </div>
+        )}
+        {proof.recipient_relation && (
+          <div>
+            <p className="text-gray-500">Left with / where</p>
+            <p className="font-medium">{leftWithLabel(proof.recipient_relation)}</p>
+          </div>
+        )}
+        {proof.captured_at && (
+          <div>
+            <p className="text-gray-500">Captured</p>
+            <p className="font-medium">{new Date(proof.captured_at).toLocaleString()}</p>
+          </div>
+        )}
+        <div>
+          <p className="text-gray-500">GPS</p>
+          {proof.lat != null && proof.lng != null ? (
+            <a
+              href={mapsLink(proof.lat, proof.lng)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-epyc-primary hover:text-blue-700"
+            >
+              {proof.lat.toFixed(5)}, {proof.lng.toFixed(5)} - view on map
+            </a>
+          ) : (
+            <p className="text-gray-400">Not captured</p>
+          )}
+        </div>
+      </div>
+      {proof.notes.length > 0 && (
+        <div className="mt-3 text-sm text-gray-700 bg-gray-50 rounded p-2 space-y-1">
+          {proof.notes.map((n, i) => (
+            <p key={i}>{n}</p>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
