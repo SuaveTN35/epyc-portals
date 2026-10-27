@@ -1,5 +1,6 @@
 import { Phone } from 'lucide-react';
 import { EPYC_DISPATCH_PHONE_DISPLAY, EPYC_DISPATCH_PHONE_TEL } from '@/lib/driver-job';
+import { IosSteps } from '@/components/driver/InstallAppCard';
 
 export const metadata = {
   title: 'Driver Help | EPYC Courier',
@@ -87,6 +88,25 @@ export default function DriverHelpPage() {
           </ul>
         </section>
       ))}
+
+      <section className="bg-white rounded-xl shadow-sm p-4">
+        <h2 className="font-semibold text-gray-900 mb-2">Install on your phone</h2>
+        <p className="text-sm text-gray-700">
+          Put EPYC Driver on your home screen so it opens full screen like any other app. Nothing to download
+          from an app store.
+        </p>
+        <h3 className="font-medium text-gray-900 mt-3">iPhone (Safari)</h3>
+        <IosSteps />
+        <h3 className="font-medium text-gray-900 mt-3">Android (Chrome)</h3>
+        <ul className="list-disc pl-5 space-y-1 text-sm text-gray-700 mt-1">
+          <li>Tap Install EPYC Driver on the Find Jobs screen, then tap Install.</li>
+          <li>No button? Tap the three-dot menu, then Install app (or Add to Home screen).</li>
+        </ul>
+        <p className="text-sm text-gray-700 mt-3">
+          Keep the app open during a job. Once it is closed, it cannot run in the background or share your
+          location.
+        </p>
+      </section>
 
       <section className="bg-white rounded-xl shadow-sm p-4">
         <h2 className="font-semibold text-gray-900 mb-2">Contact dispatch</h2>

@@ -94,6 +94,57 @@ epyc-portals/
 - Earnings tracking and history
 - Proof of delivery capture
 
+### Driver App (installable, P-352 Phase 3)
+
+The driver portal installs to a phone home screen as "EPYC Driver" (a PWA; no app store).
+
+- Manifest: `apps/web/public/driver.webmanifest` (start `/driver/jobs`, scope `/driver/`,
+  standalone). It is linked only from `apps/web/app/driver/layout.tsx`, so marketing and
+  customer pages never offer an install.
+- Icons: `apps/web/public/icons/driver-*.png`, regenerated with
+  `node apps/web/scripts/generate-driver-icons.mjs` (uses the sharp that ships with next).
+- Service worker: `apps/web/public/driver-sw.js`, scope `/driver/`, registered in production
+  only. Driver page loads are network only; when offline it shows `/driver/offline`. Only
+  `/_next/static/*` and `/icons/*` are cached. It never caches signed-in pages, `/api/*`,
+  `/auth/*`, Next.js RSC data, POSTs, or any Supabase or other cross-origin request. Bump
+  `CACHE_VERSION` in the file to clear every phone's cache on the next visit.
+- Install card on `/driver/jobs` (one tap on Android Chrome; Share -> Add to Home Screen ->
+  Add on iPhone) and an "Install on your phone" section on `/driver/help`.
+
+What works where:
+
+| | Android (Chrome) | iPhone (Safari) |
+|---|---|---|
+| Install to home screen | Yes, one-tap prompt | Yes, by the 3 Share-menu steps (no prompt API on iOS) |
+| Full screen, own icon | Yes | Yes |
+| Offline page | Yes | Yes |
+| Web push job alerts | Yes, once Phase 3b is done | iOS 16.4+ and only after Add to Home Screen |
+| Background GPS | No | No |
+
+A web app cannot track location or run in the background once closed. Location is captured
+only while the driver has the app open on an active job.
+
+#### Web push: groundwork done, sending not built (Phase 3b)
+
+Done: the `push_subscriptions` table (migration `20261028000100_push_subscriptions.sql`,
+RLS own rows only), the "Turn on job alerts" button (shown only in the installed app and only
+when `NEXT_PUBLIC_VAPID_PUBLIC_KEY` is set), saving the phone's subscription, and the service
+worker `push` / `notificationclick` handlers. Payload shape: `{ "title", "body", "url", "tag" }`;
+`url` must be a `/driver/...` path, anything else opens `/driver/jobs`.
+
+Still to do in Phase 3b:
+
+- Generate a VAPID key pair (for example `npx web-push generate-vapid-keys`) and set:
+  - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` - public key, shipped to the browser. The alerts button stays
+    hidden until this is set (it is read at build time, so redeploy after setting it).
+  - `VAPID_PRIVATE_KEY` - server only, never `NEXT_PUBLIC_`.
+  - `VAPID_SUBJECT` - `mailto:` address or site URL that push services can contact.
+- Server-side sender (for example the `web-push` package) that reads `push_subscriptions` with
+  the service role, sends on new offer / assignment, and deletes rows on a 404 or 410 reply.
+- Handle `pushsubscriptionchange`, and remove a phone's row on sign-out. Today, if two drivers
+  share one phone, the second driver's insert fails on the unique endpoint until the first
+  driver's row is removed.
+
 ### Dispatch Portal
 - Real-time delivery dashboard
 - Driver management and approval

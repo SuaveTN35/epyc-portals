@@ -17,6 +17,7 @@ import {
 import { VEHICLE_CONFIG, formatCurrency, formatDistance, formatDuration } from '@epyc/shared';
 import type { VehicleType } from '@epyc/shared';
 import { formatWindow, type DriverOfferPayload } from '@/lib/job-offers';
+import { InstallAppCard } from '@/components/driver/InstallAppCard';
 
 export default function JobsPage() {
   const [isOnline, setIsOnline] = useState(false);
@@ -141,6 +142,8 @@ export default function JobsPage() {
 
   return (
     <div>
+      <InstallAppCard />
+
       {/* Online Toggle Card */}
       <div className="bg-white rounded-xl shadow-sm p-4 mb-4">
         <div className="flex items-center justify-between">
