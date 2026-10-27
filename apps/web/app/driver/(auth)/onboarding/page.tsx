@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SMS_CONSENT_TEXT } from '@/lib/sms';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -54,6 +55,8 @@ export default function DriverOnboardingPage() {
     vehicle_photo_front_url: '',
     vehicle_photo_back_url: '',
     vehicle_photo_side_url: '',
+    // SMS consent (unticked by default; never pre-checked)
+    sms_opt_in: false,
   });
 
   const handleChange = (
@@ -125,6 +128,11 @@ export default function DriverOnboardingPage() {
       .from('profiles')
       .update({ role: 'driver' })
       .eq('id', user.id);
+
+    // SMS consent, saved separately so a problem here never blocks the role change.
+    if (formData.sms_opt_in) {
+      await supabase.from('profiles').update({ sms_opt_in: true }).eq('id', user.id);
+    }
 
     // Documents are complete; the application moves to background-check screening.
     await supabase
@@ -747,6 +755,17 @@ export default function DriverOnboardingPage() {
                   </div>
                 </div>
               </div>
+
+              <label className="flex items-start gap-3 bg-gray-50 rounded-lg p-4 cursor-pointer">
+                <input
+                  type="checkbox"
+                  name="sms_opt_in"
+                  checked={formData.sms_opt_in}
+                  onChange={handleChange}
+                  className="mt-0.5 h-5 w-5 rounded border-gray-300 text-epyc-primary flex-shrink-0"
+                />
+                <span className="text-sm text-gray-700">{SMS_CONSENT_TEXT}</span>
+              </label>
 
               <div className="flex space-x-3">
                 <button

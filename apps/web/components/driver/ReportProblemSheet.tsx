@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { Loader2, X } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { requestProblemAlert } from '@/lib/sms-client';
 import {
   EXCEPTION_REASONS,
   exceptionEventNote,
@@ -66,6 +67,9 @@ export function ReportProblemSheet({
       setError(`Could not send the report: ${eventError.message}. Call dispatch.`);
       return;
     }
+
+    // Text the ops line (reason only; the note is never sent).
+    requestProblemAlert(deliveryId, reason as string);
 
     if (photos.length > 0) {
       // No notes on this row on purpose: proof checks treat notes as
