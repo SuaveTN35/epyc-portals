@@ -32,6 +32,7 @@ import {
   deliveryStatusLabel,
 } from '@/lib/delivery-status';
 import { jobSourceLabel } from '@/lib/new-job';
+import { OfferJobDialog } from '@/components/dispatch/OfferJobDialog';
 
 interface DeliveryDetail {
   id: string;
@@ -82,6 +83,15 @@ interface DeliveryDetail {
   } | null;
 }
 
+interface JobOfferSummary {
+  id: string;
+  status: string;
+  expires_at: string;
+  responded_at: string | null;
+  created_at: string;
+  driver_name: string;
+}
+
 interface DeliveryEvent {
   id: string;
   event_type: string;
@@ -121,6 +131,9 @@ export default function DeliveryDetailPage() {
   const [pod, setPod] = useState<ProofOfDelivery | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [justCreated, setJustCreated] = useState(false);
+  const [offers, setOffers] = useState<JobOfferSummary[]>([]);
+  const [showOfferDialog, setShowOfferDialog] = useState(false);
+  const [offerNotice, setOfferNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (params.id) {
@@ -182,6 +195,24 @@ export default function DeliveryDetailPage() {
           : null,
       });
     }
+
+    // Fetch job offers for this delivery (staff select policy, Phase 1)
+    const { data: offerRows } = await supabase
+      .from('job_offers')
+      .select('id, status, expires_at, responded_at, created_at, driver:drivers(profiles(full_name))')
+      .eq('delivery_id', params.id)
+      .order('created_at', { ascending: false });
+
+    setOffers(
+      (offerRows || []).map((o: any) => ({
+        id: o.id,
+        status: o.status,
+        expires_at: o.expires_at,
+        responded_at: o.responded_at,
+        created_at: o.created_at,
+        driver_name: o.driver?.profiles?.full_name || 'Unknown',
+      }))
+    );
 
     // Fetch delivery events
     const { data: eventsData } = await supabase
@@ -266,6 +297,13 @@ export default function DeliveryDetailPage() {
     if (error) {
       alert(`Could not cancel: ${error.message}`);
     } else {
+      // Close any open offers so no driver can accept a cancelled job.
+      await supabase
+        .from('job_offers')
+        .update({ status: 'expired' })
+        .eq('delivery_id', delivery.id)
+        .eq('status', 'pending');
+
       if (delivery.driver) {
         await supabase
           .from('drivers')
@@ -344,6 +382,17 @@ export default function DeliveryDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
+          {delivery.status === 'booked' && !delivery.driver && (
+            <button
+              onClick={() => {
+                setOfferNotice(null);
+                setShowOfferDialog(true);
+              }}
+              className="px-4 py-2 border border-epyc-primary text-epyc-primary rounded-lg hover:bg-blue-50"
+            >
+              Offer to Drivers
+            </button>
+          )}
           {ASSIGNABLE_STATUSES.includes(delivery.status as any) && (
             <Link
               href={`/dispatch/deliveries?assign=${delivery.id}`}
@@ -363,6 +412,29 @@ export default function DeliveryDetailPage() {
           )}
         </div>
       </div>
+
+      {showOfferDialog && (
+        <OfferJobDialog
+          delivery={{
+            id: delivery.id,
+            driver_payout: delivery.driver_payout,
+            pickup_lat: delivery.pickup_lat ?? null,
+            pickup_lng: delivery.pickup_lng ?? null,
+          }}
+          onClose={() => setShowOfferDialog(false)}
+          onSent={(count) => {
+            setShowOfferDialog(false);
+            setOfferNotice(`Offer sent to ${count} driver${count === 1 ? '' : 's'}.`);
+            fetchDeliveryDetails();
+          }}
+        />
+      )}
+
+      {offerNotice && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-800">
+          {offerNotice}
+        </div>
+      )}
 
       {justCreated && (
         <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center text-sm text-green-800">
@@ -679,6 +751,36 @@ export default function DeliveryDetailPage() {
                   </div>
                 )}
               </div>
+            </div>
+          )}
+
+          {/* Job offers */}
+          {offers.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+              <h2 className="text-lg font-semibold text-gray-900 mb-4">Job Offers</h2>
+              <ul className="space-y-2 text-sm">
+                {offers.map((o) => {
+                  const expired =
+                    o.status === 'pending' && new Date(o.expires_at).getTime() <= Date.now();
+                  const label = expired ? 'expired' : o.status;
+                  return (
+                    <li key={o.id} className="flex justify-between gap-2">
+                      <span className="text-gray-700">{o.driver_name}</span>
+                      <span
+                        className={`capitalize ${
+                          label === 'accepted'
+                            ? 'text-green-600'
+                            : label === 'pending'
+                              ? 'text-blue-600'
+                              : 'text-gray-500'
+                        }`}
+                      >
+                        {label === 'rejected' ? 'declined' : label}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           )}
 

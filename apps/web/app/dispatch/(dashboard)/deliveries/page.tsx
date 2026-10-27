@@ -244,6 +244,13 @@ export default function DeliveriesPage() {
       return;
     }
 
+    // A direct assignment closes any open offers for this job.
+    await supabase
+      .from('job_offers')
+      .update({ status: 'expired' })
+      .eq('delivery_id', selectedDelivery.id)
+      .eq('status', 'pending');
+
     // Release the previous driver on a reassignment.
     if (previousDriverId && previousDriverId !== driverId) {
       await supabase
