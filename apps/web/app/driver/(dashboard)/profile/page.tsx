@@ -14,6 +14,7 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { VEHICLE_CONFIG, LOYALTY_TIER_CONFIG } from '@epyc/shared';
+import { SmsOptInToggle } from '@/components/driver/SmsOptInToggle';
 
 export default async function ProfilePage() {
   const supabase = await createClient();
@@ -197,6 +198,8 @@ export default async function ProfilePage() {
       </div>
 
       {/* Menu Items */}
+      <SmsOptInToggle initial={profile?.sms_opt_in === true} hasPhone={!!profile?.phone} />
+
       <div className="bg-white rounded-xl shadow-sm">
         <MenuItem icon={User} label="Edit Profile" href="mailto:admin@epyccs.com?subject=Profile%20Update%20Request" />
         <MenuItem icon={Car} label="Update Vehicle" href="mailto:admin@epyccs.com?subject=Vehicle%20Update%20Request" />

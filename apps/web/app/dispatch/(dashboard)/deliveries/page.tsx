@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { requestAssignedText } from '@/lib/sms-client';
 import {
   Package,
   Search,
@@ -243,6 +244,9 @@ export default function DeliveriesPage() {
       setAssigning(false);
       return;
     }
+
+    // Text the driver now on the job, if they opted in to SMS.
+    requestAssignedText(selectedDelivery.id);
 
     // A direct assignment closes any open offers for this job.
     await supabase

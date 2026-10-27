@@ -8,6 +8,7 @@ import {
   distanceToPickupMiles,
   offerExpiresAt,
 } from '@/lib/job-offers';
+import { requestOfferTexts } from '@/lib/sms-client';
 
 interface OfferDriver {
   id: string;
@@ -130,6 +131,9 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
       notes: `Offered to ${rows.length} driver${rows.length === 1 ? '' : 's'}, expires in ${expiry} min`,
       created_by: user?.id ?? null,
     });
+
+    // Text each offered driver who opted in to SMS (server checks staff + consent).
+    requestOfferTexts(delivery.id, rows.map((r) => r.driver_id));
 
     setSending(false);
     onSent(rows.length);

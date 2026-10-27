@@ -145,6 +145,45 @@ Still to do in Phase 3b:
   share one phone, the second driver's insert fails on the unique endpoint until the first
   driver's row is removed.
 
+### Driver SMS job alerts (P-352 Phase 3)
+
+Texts go out through Twilio's REST API (`apps/web/lib/server/sms.ts`, plain `fetch`, no SDK).
+Without Twilio env vars every send is a no-op that logs `SMS not configured`, and nothing fails.
+
+| When | To | Text |
+|---|---|---|
+| Dispatch offers a job (`OfferJobDialog` -> `POST /api/dispatch/sms/offer`, staff only) | each offered driver | `EPYC: New job offer - <pickup city> to <drop-off city>, $<payout>. Open the app to accept: https://www.epyccs.com/driver/jobs` |
+| Dispatch assigns a job directly (`POST /api/dispatch/sms/assigned`, staff only) | the assigned driver | `EPYC: You've been assigned a job. Open: https://www.epyccs.com/driver/delivery/<id>` |
+| Driver reports a problem (`POST /api/driver/deliveries/<id>/problem-alert`) | `EPYC_OPS_SMS` | reason label and job reference only; the driver's note is never sent |
+
+Rules built in:
+
+- Drivers are texted only when `profiles.sms_opt_in` is true. They opt in with the unticked
+  checkbox on the last onboarding step, or later on their Profile page. Consent text: "Text me
+  job offers and updates. Msg and data rates may apply. Reply STOP to opt out."
+  `profiles.sms_opt_in_at` is stamped by a database trigger when consent is given.
+- No customer names, street addresses, or medical details in any text: cities, payout, and links only.
+- The first text a number ever receives ends with "Reply STOP to opt out."
+- Every attempted send is logged in `sms_log` (staff can read; only the server writes). If Twilio
+  reports the driver replied STOP (error 21610), `sms_opt_in` is switched off.
+- The same text is not repeated to the same driver for the same job within 10 minutes.
+
+Environment variables (server only, never `NEXT_PUBLIC_`):
+
+- `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`
+- `TWILIO_PHONE_NUMBER` (any US format; normalized to E.164) or `TWILIO_MESSAGING_SERVICE_SID`
+  (used first when both are set)
+- `EPYC_OPS_SMS` - ops phone for problem alerts; unset means no ops texts
+
+Before going live: US carriers block or filter application texts sent from an unregistered
+10-digit long code. Register the business brand and an A2P 10DLC campaign in the Twilio console
+(Messaging -> Regulatory Compliance), attach the sending number to a Messaging Service on that
+campaign, and set `TWILIO_MESSAGING_SERVICE_SID`. The campaign sample messages and the opt-in
+description should match the texts and the consent checkbox above. A toll-free number needs
+toll-free verification instead. Registration review time is set by Twilio and the carriers.
+
+Migration: `packages/supabase/migrations/20261028000200_sms_alerts.sql`.
+
 ### Dispatch Portal
 - Real-time delivery dashboard
 - Driver management and approval
