@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { ACTIVE_DELIVERY_STATUSES, deliveryStatusLabel } from '@/lib/delivery-status';
 import { useGoogleMaps } from '@/lib/hooks/useGoogleMaps';
 import {
   Map,
@@ -48,10 +49,13 @@ interface ActiveDelivery {
 }
 
 const statusColors: Record<string, string> = {
-  pending: '#EAB308',
+  booked: '#EAB308',
   assigned: '#3B82F6',
+  en_route_pickup: '#F59E0B',
+  arrived_pickup: '#F97316',
   picked_up: '#8B5CF6',
-  in_transit: '#6366F1',
+  en_route_delivery: '#6366F1',
+  arrived_delivery: '#14B8A6',
 };
 
 export default function LiveMapPage() {
@@ -284,7 +288,7 @@ export default function LiveMapPage() {
         service_level,
         driver_id
       `)
-      .in('status', ['pending', 'assigned', 'picked_up', 'in_transit']);
+      .in('status', ['booked', ...ACTIVE_DELIVERY_STATUSES]);
 
     if (deliveries) {
       setActiveDeliveries(
@@ -450,7 +454,7 @@ export default function LiveMapPage() {
                             color: statusColors[delivery.status],
                           }}
                         >
-                          {delivery.status.replace('_', ' ')}
+                          {deliveryStatusLabel(delivery.status)}
                         </span>
                       </div>
                       <div className="space-y-1">
@@ -617,7 +621,7 @@ export default function LiveMapPage() {
                     color: statusColors[selectedDelivery.status],
                   }}
                 >
-                  {selectedDelivery.status.replace('_', ' ')}
+                  {deliveryStatusLabel(selectedDelivery.status)}
                 </span>
               </div>
               <button

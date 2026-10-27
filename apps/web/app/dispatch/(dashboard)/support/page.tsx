@@ -127,14 +127,12 @@ export default function SupportPage() {
         description,
         status,
         priority,
-        category,
         delivery_id,
-        user_id,
+        created_by,
         created_at,
-        updated_at,
+        resolved_at,
         assigned_to,
-        resolution,
-        user:profiles!support_tickets_user_id_fkey(full_name, email),
+        user:profiles!created_by(full_name, email, role),
         delivery:deliveries(tracking_number)
       `)
       .order('created_at', { ascending: false });
@@ -157,17 +155,18 @@ export default function SupportPage() {
           description: t.description,
           status: t.status,
           priority: t.priority,
-          category: t.category,
+          // support_tickets has no category column live.
+          category: 'general',
           delivery_id: t.delivery_id,
           delivery_tracking: t.delivery?.tracking_number || null,
-          user_id: t.user_id,
+          user_id: t.created_by,
           user_name: t.user?.full_name || 'Unknown User',
           user_email: t.user?.email || '',
-          user_type: t.category?.includes('driver') ? 'driver' : 'customer',
+          user_type: t.user?.role === 'driver' ? 'driver' : 'customer',
           created_at: t.created_at,
-          updated_at: t.updated_at,
+          updated_at: t.resolved_at || t.created_at,
           assigned_to: t.assigned_to,
-          resolution: t.resolution,
+          resolution: null,
         }))
       );
     }
@@ -198,7 +197,7 @@ export default function SupportPage() {
       .from('support_tickets')
       .update({
         status: newStatus,
-        updated_at: new Date().toISOString(),
+        resolved_at: ['resolved', 'closed'].includes(newStatus) ? new Date().toISOString() : null,
       })
       .eq('id', selectedTicket.id);
 

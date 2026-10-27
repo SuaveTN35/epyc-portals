@@ -33,6 +33,7 @@ export default function DeliveryDetailPage() {
   const [showPODSheet, setShowPODSheet] = useState(false);
   const [showTempSheet, setShowTempSheet] = useState(false);
   const [showNavSheet, setShowNavSheet] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -89,10 +90,15 @@ export default function DeliveryDetailPage() {
       return;
     }
 
-    await supabase
+    setStatusError(null);
+    const { error } = await supabase
       .from('deliveries')
       .update(updates)
       .eq('id', deliveryId);
+
+    if (error) {
+      setStatusError(`Could not update status: ${error.message}`);
+    }
 
     setUpdating(false);
     fetchDelivery();
@@ -373,6 +379,15 @@ export default function DeliveryDetailPage() {
         </div>
       )}
 
+      {statusError && (
+        <div className="fixed top-4 left-4 right-4 z-40 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 shadow">
+          {statusError}
+          <button onClick={() => setStatusError(null)} className="ml-2 underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* POD Bottom Sheet */}
       {showPODSheet && (
         <PODBottomSheet
@@ -407,6 +422,134 @@ export default function DeliveryDetailPage() {
   );
 }
 
+/** Best-effort GPS fix; resolves null if unavailable or denied. */
+function getCurrentPosition(timeoutMs = 8000): Promise<{ lat: number; lng: number } | null> {
+  if (typeof navigator === 'undefined' || !navigator.geolocation) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => resolve(null),
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 60000 }
+    );
+  });
+}
+
+/**
+ * Finger or stylus signature pad on a plain canvas (no extra dependency).
+ * Calls onChange with a PNG data URL after each stroke, or null when cleared.
+ */
+function SignaturePad({ onChange }: { onChange: (dataUrl: string | null) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawingRef = useRef(false);
+  const hasInkRef = useRef(false);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+
+  // Size the backing store to the displayed size and device pixel ratio.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ratio = Math.max(window.devicePixelRatio || 1, 1);
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = Math.round(rect.width * ratio);
+    canvas.height = Math.round(rect.height * ratio);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.scale(ratio, ratio);
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = '#111827';
+  }, []);
+
+  const pointFor = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    drawingRef.current = true;
+    const p = pointFor(e);
+    lastPointRef.current = p;
+    const ctx = e.currentTarget.getContext('2d');
+    if (ctx) {
+      // A dot, so a single tap still leaves a mark.
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.2, 0, Math.PI * 2);
+      ctx.fillStyle = '#111827';
+      ctx.fill();
+    }
+    hasInkRef.current = true;
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
+    e.preventDefault();
+    const ctx = e.currentTarget.getContext('2d');
+    const last = lastPointRef.current;
+    const p = pointFor(e);
+    if (ctx && last) {
+      ctx.beginPath();
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+    }
+    lastPointRef.current = p;
+  };
+
+  const endStroke = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (!drawingRef.current) return;
+    drawingRef.current = false;
+    lastPointRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+    if (hasInkRef.current && canvasRef.current) {
+      onChange(canvasRef.current.toDataURL('image/png'));
+    }
+  };
+
+  const clear = () => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (canvas && ctx) {
+      ctx.save();
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
+    hasInkRef.current = false;
+    onChange(null);
+  };
+
+  return (
+    <div>
+      <div className="relative bg-white border-2 border-dashed border-gray-300 rounded-xl">
+        <canvas
+          ref={canvasRef}
+          className="w-full h-48 rounded-xl"
+          style={{ touchAction: 'none' }}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={endStroke}
+          onPointerCancel={endStroke}
+          onPointerLeave={endStroke}
+          aria-label="Signature pad"
+        />
+        <p className="absolute bottom-2 left-3 text-xs text-gray-400 pointer-events-none">
+          Recipient signs here
+        </p>
+      </div>
+      <div className="flex justify-end mt-2">
+        <button type="button" onClick={clear} className="text-sm text-gray-600 underline">
+          Clear
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function PODBottomSheet({
   deliveryId,
   requiresSignature,
@@ -419,84 +562,156 @@ function PODBottomSheet({
   onComplete: () => void;
 }) {
   const [step, setStep] = useState<'photo' | 'signature' | 'confirm'>('photo');
-  const [photoUrl, setPhotoUrl] = useState<string | null>(null);
+  // Storage path inside the private delivery-photos bucket.
+  const [photoPath, setPhotoPath] = useState<string | null>(null);
+  // Local preview only; the bucket is private so there is no public URL.
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [signatureData, setSignatureData] = useState<string | null>(null);
   const [recipientName, setRecipientName] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = createClient();
+
+  useEffect(() => {
+    return () => {
+      if (photoPreview) URL.revokeObjectURL(photoPreview);
+    };
+  }, [photoPreview]);
 
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Upload to Supabase Storage
-    const fileName = `pod/${deliveryId}/${Date.now()}.jpg`;
-    const { data, error } = await supabase.storage
-      .from('delivery-photos')
-      .upload(fileName, file);
+    setError(null);
+    setUploading(true);
+    if (photoPreview) URL.revokeObjectURL(photoPreview);
+    setPhotoPreview(URL.createObjectURL(file));
 
-    if (!error && data) {
-      const { data: urlData } = supabase.storage
-        .from('delivery-photos')
-        .getPublicUrl(fileName);
-      setPhotoUrl(urlData.publicUrl);
-      setStep(requiresSignature ? 'signature' : 'confirm');
+    // Path must start with the delivery id: the storage policy only lets the
+    // assigned driver write under <delivery_id>/.
+    const fileName = `${deliveryId}/${Date.now()}.jpg`;
+    const { error: uploadError } = await supabase.storage
+      .from('delivery-photos')
+      .upload(fileName, file, { contentType: file.type || 'image/jpeg', upsert: false });
+
+    setUploading(false);
+    // Allow re-selecting the same file after an error.
+    e.target.value = '';
+
+    if (uploadError) {
+      setPhotoPath(null);
+      setError(`Photo upload failed: ${uploadError.message}. Check your signal and try again.`);
+      return;
     }
+
+    setPhotoPath(fileName);
   };
 
   const handleSubmit = async () => {
-    setSubmitting(true);
+    setError(null);
 
-    // Save POD records
-    if (photoUrl) {
-      await supabase.from('proof_of_delivery').insert({
-        delivery_id: deliveryId,
-        type: 'photo',
-        photo_url: photoUrl,
-      });
+    if (!photoPath) {
+      setError('Take a photo of the package before completing.');
+      setStep('photo');
+      return;
+    }
+    if (requiresSignature && (!signatureData || !recipientName.trim())) {
+      setError('A signature and the recipient name are required for this delivery.');
+      setStep('signature');
+      return;
     }
 
+    setSubmitting(true);
+    const gps = await getCurrentPosition();
+    const capturedAt = new Date().toISOString();
+
+    const podRows: Record<string, unknown>[] = [
+      {
+        delivery_id: deliveryId,
+        type: 'photo',
+        photo_url: photoPath,
+        recipient_name: recipientName.trim() || null,
+        lat: gps?.lat ?? null,
+        lng: gps?.lng ?? null,
+        captured_at: capturedAt,
+      },
+    ];
     if (signatureData) {
-      await supabase.from('proof_of_delivery').insert({
+      podRows.push({
         delivery_id: deliveryId,
         type: 'signature',
         signature_data: signatureData,
-        recipient_name: recipientName,
+        recipient_name: recipientName.trim() || null,
+        lat: gps?.lat ?? null,
+        lng: gps?.lng ?? null,
+        captured_at: capturedAt,
       });
     }
 
-    // Update delivery status
-    await supabase
+    // Proof first. The job is only marked delivered once proof is saved.
+    const { error: podError } = await supabase.from('proof_of_delivery').insert(podRows);
+    if (podError) {
+      setSubmitting(false);
+      setError(`Could not save proof of delivery: ${podError.message}. The delivery is NOT complete yet; try again.`);
+      return;
+    }
+
+    const { error: statusError } = await supabase
       .from('deliveries')
       .update({
         status: 'delivered',
-        actual_delivery_time: new Date().toISOString(),
+        actual_delivery_time: capturedAt,
       })
       .eq('id', deliveryId);
 
+    if (statusError) {
+      setSubmitting(false);
+      setError(`Proof saved, but marking the job delivered failed: ${statusError.message}. Try again or call dispatch.`);
+      return;
+    }
+
+    // Free the driver for the next job. Best effort: dispatch can also clear it.
+    const { data: { user } } = await supabase.auth.getUser();
+    if (user) {
+      await supabase
+        .from('drivers')
+        .update({ current_delivery_id: null, last_active_at: capturedAt })
+        .eq('profile_id', user.id)
+        .eq('current_delivery_id', deliveryId);
+    }
+
+    setSubmitting(false);
     onComplete();
   };
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50">
-      <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl slide-up safe-area-bottom">
+      <div className="absolute bottom-0 left-0 right-0 bg-white rounded-t-2xl slide-up safe-area-bottom max-h-[90vh] overflow-y-auto">
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center justify-between">
             <h3 className="text-lg font-semibold">Proof of Delivery</h3>
-            <button onClick={onClose} className="p-2">
+            <button onClick={onClose} className="p-2" disabled={submitting}>
               <X className="h-6 w-6 text-gray-400" />
             </button>
           </div>
         </div>
 
         <div className="p-4">
+          {error && (
+            <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-3 flex items-start">
+              <AlertTriangle className="h-5 w-5 text-red-500 mr-2 flex-shrink-0" />
+              <p className="text-sm text-red-700">{error}</p>
+            </div>
+          )}
+
           {step === 'photo' && (
             <div className="text-center">
               <div className="bg-gray-100 rounded-xl p-8 mb-4">
-                {photoUrl ? (
-                  <img src={photoUrl} alt="POD" className="w-full rounded-lg" />
+                {photoPreview ? (
+                  <img src={photoPreview} alt="POD" className="w-full rounded-lg" />
                 ) : (
                   <Camera className="h-16 w-16 text-gray-400 mx-auto" />
                 )}
@@ -511,10 +726,25 @@ function PODBottomSheet({
               />
               <button
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full py-3 bg-epyc-primary text-white rounded-lg font-medium"
+                disabled={uploading}
+                className="w-full py-3 bg-epyc-primary text-white rounded-lg font-medium flex items-center justify-center disabled:opacity-50"
               >
-                {photoUrl ? 'Retake Photo' : 'Take Photo of Package'}
+                {uploading ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : photoPreview ? (
+                  'Retake Photo'
+                ) : (
+                  'Take Photo of Package'
+                )}
               </button>
+              {photoPath && !uploading && (
+                <button
+                  onClick={() => setStep(requiresSignature ? 'signature' : 'confirm')}
+                  className="w-full mt-3 py-3 border border-epyc-primary text-epyc-primary rounded-lg font-medium"
+                >
+                  Continue
+                </button>
+              )}
             </div>
           )}
 
@@ -530,15 +760,23 @@ function PODBottomSheet({
                   onChange={(e) => setRecipientName(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
                   placeholder="Enter recipient's name"
+                  autoComplete="off"
                 />
               </div>
-              <div className="bg-gray-100 rounded-xl p-4 mb-4 h-48 flex items-center justify-center">
-                <p className="text-gray-500">Signature Canvas</p>
-                {/* In production, use react-signature-canvas here */}
+              <div className="mb-4">
+                <SignaturePad onChange={setSignatureData} />
               </div>
               <button
                 onClick={() => {
-                  setSignatureData('mock-signature-data');
+                  if (!signatureData) {
+                    setError('Have the recipient sign in the box first.');
+                    return;
+                  }
+                  if (!recipientName.trim()) {
+                    setError('Enter the recipient name.');
+                    return;
+                  }
+                  setError(null);
                   setStep('confirm');
                 }}
                 className="w-full py-3 bg-epyc-primary text-white rounded-lg font-medium"
@@ -554,9 +792,24 @@ function PODBottomSheet({
                 <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-2" />
                 <p className="font-medium text-green-800">Ready to Complete</p>
                 <p className="text-sm text-green-600">
-                  Photo {requiresSignature && '& signature'} captured
+                  Photo {signatureData ? '& signature' : ''} captured
                 </p>
               </div>
+              {!requiresSignature && (
+                <div className="mb-4">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Received by (optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={recipientName}
+                    onChange={(e) => setRecipientName(e.target.value)}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    placeholder="Name, or left at door"
+                    autoComplete="off"
+                  />
+                </div>
+              )}
               <button
                 onClick={handleSubmit}
                 disabled={submitting}
@@ -589,6 +842,7 @@ function TemperatureSheet({
 }) {
   const [temperature, setTemperature] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const supabase = createClient();
 
   const handleSubmit = async () => {
@@ -612,7 +866,11 @@ function TemperatureSheet({
 
     // Get driver ID
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setSubmitting(false);
+      setError('Your session expired. Sign in again.');
+      return;
+    }
 
     const { data: driver } = await supabase
       .from('drivers')
@@ -621,7 +879,7 @@ function TemperatureSheet({
       .single();
 
     // Log temperature
-    await supabase.from('temperature_logs').insert({
+    const { error: logError } = await supabase.from('temperature_logs').insert({
       delivery_id: deliveryId,
       driver_id: driver?.id,
       temperature: temp,
@@ -630,7 +888,7 @@ function TemperatureSheet({
     });
 
     // Also save as POD
-    await supabase.from('proof_of_delivery').insert({
+    const { error: podError } = await supabase.from('proof_of_delivery').insert({
       delivery_id: deliveryId,
       type: 'temperature',
       temperature_reading: temp,
@@ -639,6 +897,10 @@ function TemperatureSheet({
     });
 
     setSubmitting(false);
+    if (logError || podError) {
+      setError(`Could not save the reading: ${(logError || podError)?.message}`);
+      return;
+    }
     onClose();
   };
 
@@ -679,6 +941,10 @@ function TemperatureSheet({
               placeholder="0.0"
             />
           </div>
+
+          {error && (
+            <div className="bg-red-50 rounded-lg p-3 mb-4 text-sm text-red-700">{error}</div>
+          )}
 
           {isOutOfRange && (
             <div className="bg-red-50 rounded-lg p-3 mb-4 flex items-start">

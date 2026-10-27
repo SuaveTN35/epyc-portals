@@ -25,6 +25,12 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
+import {
+  ASSIGNABLE_STATUSES,
+  CANCELLABLE_STATUSES,
+  deliveryStatusBadge,
+  deliveryStatusLabel,
+} from '@/lib/delivery-status';
 
 interface DeliveryDetail {
   id: string;
@@ -45,20 +51,20 @@ interface DeliveryDetail {
   delivery_instructions: string | null;
   package_description: string;
   package_weight: number;
-  total_amount: number;
+  total_price: number | null;
   distance_miles: number;
-  driver_payout: number;
+  driver_payout: number | null;
   requires_signature: boolean;
   is_fragile: boolean;
   is_hipaa: boolean;
   requires_temperature_control: boolean;
-  min_temperature: number | null;
-  max_temperature: number | null;
+  temperature_min: number | null;
+  temperature_max: number | null;
   created_at: string;
   assigned_at: string | null;
-  picked_up_at: string | null;
-  delivered_at: string | null;
-  scheduled_pickup: string | null;
+  actual_pickup_time: string | null;
+  actual_delivery_time: string | null;
+  pickup_window_start: string | null;
   driver: {
     id: string;
     full_name: string;
@@ -76,9 +82,12 @@ interface DeliveryDetail {
 interface DeliveryEvent {
   id: string;
   event_type: string;
-  description: string;
+  old_status: string | null;
+  new_status: string | null;
+  notes: string | null;
+  lat: number | null;
+  lng: number | null;
   created_at: string;
-  location: string | null;
 }
 
 interface TemperatureLog {
@@ -87,23 +96,17 @@ interface TemperatureLog {
   recorded_at: string;
 }
 
+// proof_of_delivery stores one row per capture type (photo, signature, ...).
+// This is the merged view dispatch shows.
 interface ProofOfDelivery {
-  id: string;
-  photo_url: string;
-  signature_url: string | null;
-  recipient_name: string;
+  photo_signed_url: string | null;
+  signature_data: string | null;
+  recipient_name: string | null;
   notes: string | null;
-  created_at: string;
+  lat: number | null;
+  lng: number | null;
+  captured_at: string | null;
 }
-
-const statusColors: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-  assigned: 'bg-blue-100 text-blue-800 border-blue-300',
-  picked_up: 'bg-purple-100 text-purple-800 border-purple-300',
-  in_transit: 'bg-indigo-100 text-indigo-800 border-indigo-300',
-  delivered: 'bg-green-100 text-green-800 border-green-300',
-  cancelled: 'bg-red-100 text-red-800 border-red-300',
-};
 
 export default function DeliveryDetailPage() {
   const params = useParams();
@@ -130,12 +133,12 @@ export default function DeliveryDetailPage() {
       .from('deliveries')
       .select(`
         *,
-        driver:drivers(
+        driver:drivers!driver_id(
           id,
           vehicle_type,
           profiles(full_name, phone)
         ),
-        customer:profiles!deliveries_customer_id_fkey(
+        customer:profiles!customer_id(
           id,
           full_name,
           email,
@@ -190,15 +193,44 @@ export default function DeliveryDetailPage() {
       setTemperatureLogs(tempData);
     }
 
-    // Fetch proof of delivery
-    const { data: podData } = await supabase
+    // Fetch proof of delivery (one row per capture type)
+    const { data: podRows } = await supabase
       .from('proof_of_delivery')
-      .select('*')
+      .select('type, photo_url, signature_data, recipient_name, notes, lat, lng, captured_at')
       .eq('delivery_id', params.id)
-      .single();
+      .order('captured_at', { ascending: true });
 
-    if (podData) {
-      setPod(podData);
+    if (podRows && podRows.length > 0) {
+      const photoRow = podRows.find((r: any) => r.type === 'photo' && r.photo_url);
+      const sigRow = podRows.find((r: any) => r.type === 'signature' && r.signature_data);
+      const withName = podRows.find((r: any) => r.recipient_name);
+      const withNotes = podRows.find((r: any) => r.notes);
+      const withGps = podRows.find((r: any) => r.lat != null && r.lng != null);
+
+      // photo_url holds a path in the private delivery-photos bucket.
+      let photoSignedUrl: string | null = null;
+      if (photoRow?.photo_url) {
+        if (/^https?:\/\//.test(photoRow.photo_url)) {
+          photoSignedUrl = photoRow.photo_url;
+        } else {
+          const { data: signed } = await supabase.storage
+            .from('delivery-photos')
+            .createSignedUrl(photoRow.photo_url, 300);
+          photoSignedUrl = signed?.signedUrl ?? null;
+        }
+      }
+
+      setPod({
+        photo_signed_url: photoSignedUrl,
+        signature_data: sigRow?.signature_data ?? null,
+        recipient_name: withName?.recipient_name ?? null,
+        notes: withNotes?.notes ?? null,
+        lat: withGps?.lat ?? null,
+        lng: withGps?.lng ?? null,
+        captured_at: podRows[podRows.length - 1].captured_at ?? null,
+      });
+    } else {
+      setPod(null);
     }
 
     setLoading(false);
@@ -210,16 +242,31 @@ export default function DeliveryDetailPage() {
     setCancelling(true);
     const supabase = createClient();
 
+    const { data: { user } } = await supabase.auth.getUser();
+
+    // The status-change trigger logs the transition; this event adds who did it.
     const { error } = await supabase
       .from('deliveries')
       .update({ status: 'cancelled' })
       .eq('id', delivery.id);
 
-    if (!error) {
+    if (error) {
+      alert(`Could not cancel: ${error.message}`);
+    } else {
+      if (delivery.driver) {
+        await supabase
+          .from('drivers')
+          .update({ current_delivery_id: null })
+          .eq('id', delivery.driver.id)
+          .eq('current_delivery_id', delivery.id);
+      }
       await supabase.from('delivery_events').insert({
         delivery_id: delivery.id,
-        event_type: 'cancelled',
-        description: 'Delivery cancelled by dispatcher',
+        event_type: 'cancelled_by_dispatch',
+        old_status: delivery.status,
+        new_status: 'cancelled',
+        notes: 'Delivery cancelled by dispatcher',
+        created_by: user?.id ?? null,
       });
 
       fetchDeliveryDetails();
@@ -269,9 +316,9 @@ export default function DeliveryDetailPage() {
             </h1>
             <div className="flex items-center gap-2 mt-1">
               <span
-                className={`status-badge border ${statusColors[delivery.status]}`}
+                className={`status-badge border ${deliveryStatusBadge(delivery.status)}`}
               >
-                {delivery.status.replace('_', ' ')}
+                {deliveryStatusLabel(delivery.status)}
               </span>
               <span className="text-sm text-gray-500 capitalize">
                 {delivery.service_level.replace('_', ' ')} Service
@@ -280,15 +327,15 @@ export default function DeliveryDetailPage() {
           </div>
         </div>
         <div className="flex gap-2">
-          {delivery.status === 'pending' && (
+          {ASSIGNABLE_STATUSES.includes(delivery.status as any) && (
             <Link
               href={`/dispatch/deliveries?assign=${delivery.id}`}
               className="px-4 py-2 bg-epyc-primary text-white rounded-lg hover:bg-blue-700"
             >
-              Assign Driver
+              {delivery.driver ? 'Reassign Driver' : 'Assign Driver'}
             </Link>
           )}
-          {!['delivered', 'cancelled'].includes(delivery.status) && (
+          {CANCELLABLE_STATUSES.includes(delivery.status as any) && (
             <button
               onClick={handleCancelDelivery}
               disabled={cancelling}
@@ -411,7 +458,7 @@ export default function DeliveryDetailPage() {
                   <span className="font-medium text-blue-900">Temperature Requirements</span>
                 </div>
                 <p className="text-sm text-blue-800">
-                  {delivery.min_temperature}°F - {delivery.max_temperature}°F
+                  {delivery.temperature_min}°F - {delivery.temperature_max}°F
                 </p>
                 {temperatureLogs.length > 0 && (
                   <div className="mt-2">
@@ -430,21 +477,21 @@ export default function DeliveryDetailPage() {
             <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
               <h2 className="text-lg font-semibold text-gray-900 mb-4">Proof of Delivery</h2>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {pod.photo_url && (
+                {pod.photo_signed_url && (
                   <div>
                     <p className="text-sm text-gray-500 mb-2">Photo</p>
                     <img
-                      src={pod.photo_url}
+                      src={pod.photo_signed_url}
                       alt="Delivery photo"
                       className="w-full h-48 object-cover rounded-lg"
                     />
                   </div>
                 )}
-                {pod.signature_url && (
+                {pod.signature_data && (
                   <div>
                     <p className="text-sm text-gray-500 mb-2">Signature</p>
                     <img
-                      src={pod.signature_url}
+                      src={pod.signature_data}
                       alt="Recipient signature"
                       className="w-full h-48 object-contain bg-gray-50 rounded-lg"
                     />
@@ -453,9 +500,14 @@ export default function DeliveryDetailPage() {
               </div>
               <div className="mt-4">
                 <p className="text-sm text-gray-500">Received by</p>
-                <p className="font-medium">{pod.recipient_name}</p>
+                <p className="font-medium">{pod.recipient_name || 'Not recorded'}</p>
                 {pod.notes && (
                   <p className="text-sm text-gray-600 mt-1">{pod.notes}</p>
+                )}
+                {pod.lat != null && pod.lng != null && (
+                  <p className="text-xs text-gray-500 mt-1">
+                    GPS {pod.lat.toFixed(5)}, {pod.lng.toFixed(5)}
+                  </p>
                 )}
               </div>
             </div>
@@ -477,14 +529,22 @@ export default function DeliveryDetailPage() {
                   </div>
                   <div className="flex-1 pb-4">
                     <p className="font-medium text-gray-900 capitalize">
-                      {event.event_type.replace('_', ' ')}
+                      {event.event_type.replace(/_/g, ' ')}
                     </p>
-                    <p className="text-sm text-gray-600">{event.description}</p>
+                    {event.new_status && (
+                      <p className="text-sm text-gray-600">
+                        {event.old_status ? `${deliveryStatusLabel(event.old_status)} -> ` : ''}
+                        {deliveryStatusLabel(event.new_status)}
+                      </p>
+                    )}
+                    {event.notes && <p className="text-sm text-gray-600">{event.notes}</p>}
                     <p className="text-xs text-gray-400 mt-1">
                       {new Date(event.created_at).toLocaleString()}
                     </p>
-                    {event.location && (
-                      <p className="text-xs text-gray-500">{event.location}</p>
+                    {event.lat != null && event.lng != null && (
+                      <p className="text-xs text-gray-500">
+                        {event.lat.toFixed(5)}, {event.lng.toFixed(5)}
+                      </p>
                     )}
                   </div>
                 </div>
@@ -505,19 +565,19 @@ export default function DeliveryDetailPage() {
               <div className="flex justify-between">
                 <span className="text-gray-600">Total Amount</span>
                 <span className="font-semibold">
-                  {formatCurrency(delivery.total_amount / 100)}
+                  {formatCurrency(delivery.total_price || 0)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Driver Payout</span>
                 <span className="font-medium text-green-600">
-                  {formatCurrency(delivery.driver_payout / 100)}
+                  {formatCurrency(delivery.driver_payout || 0)}
                 </span>
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-600">Platform Fee</span>
                 <span className="text-gray-500">
-                  {formatCurrency((delivery.total_amount - delivery.driver_payout) / 100)}
+                  {formatCurrency((delivery.total_price || 0) - (delivery.driver_payout || 0))}
                 </span>
               </div>
             </div>
@@ -600,10 +660,10 @@ export default function DeliveryDetailPage() {
                 <span className="text-gray-600">Created</span>
                 <span>{new Date(delivery.created_at).toLocaleString()}</span>
               </div>
-              {delivery.scheduled_pickup && (
+              {delivery.pickup_window_start && (
                 <div className="flex justify-between">
                   <span className="text-gray-600">Scheduled</span>
-                  <span>{new Date(delivery.scheduled_pickup).toLocaleString()}</span>
+                  <span>{new Date(delivery.pickup_window_start).toLocaleString()}</span>
                 </div>
               )}
               {delivery.assigned_at && (
@@ -612,16 +672,16 @@ export default function DeliveryDetailPage() {
                   <span>{new Date(delivery.assigned_at).toLocaleString()}</span>
                 </div>
               )}
-              {delivery.picked_up_at && (
+              {delivery.actual_pickup_time && (
                 <div className="flex justify-between">
                   <span className="text-gray-600">Picked Up</span>
-                  <span>{new Date(delivery.picked_up_at).toLocaleString()}</span>
+                  <span>{new Date(delivery.actual_pickup_time).toLocaleString()}</span>
                 </div>
               )}
-              {delivery.delivered_at && (
+              {delivery.actual_delivery_time && (
                 <div className="flex justify-between">
                   <span className="text-gray-600">Delivered</span>
-                  <span>{new Date(delivery.delivered_at).toLocaleString()}</span>
+                  <span>{new Date(delivery.actual_delivery_time).toLocaleString()}</span>
                 </div>
               )}
             </div>

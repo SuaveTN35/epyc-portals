@@ -20,6 +20,13 @@ import {
   Link2,
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
+import {
+  ASSIGNABLE_STATUSES,
+  AWAITING_ASSIGNMENT_STATUSES,
+  DELIVERY_STATUSES,
+  deliveryStatusBadge,
+  deliveryStatusLabel,
+} from '@/lib/delivery-status';
 
 interface Delivery {
   id: string;
@@ -30,10 +37,10 @@ interface Delivery {
   delivery_address: string;
   pickup_contact_name: string;
   delivery_contact_name: string;
-  total_amount: number;
+  total_price: number | null;
   distance_miles: number;
   created_at: string;
-  scheduled_pickup: string | null;
+  pickup_window_start: string | null;
   driver_id: string | null;
   driver_name: string | null;
   customer_name: string | null;
@@ -54,39 +61,30 @@ interface Driver {
 
 const statusOptions = [
   { value: 'all', label: 'All Statuses' },
-  { value: 'pending', label: 'Pending' },
-  { value: 'assigned', label: 'Assigned' },
-  { value: 'picked_up', label: 'Picked Up' },
-  { value: 'in_transit', label: 'In Transit' },
-  { value: 'delivered', label: 'Delivered' },
-  { value: 'cancelled', label: 'Cancelled' },
+  ...DELIVERY_STATUSES.map((s) => ({ value: s, label: deliveryStatusLabel(s) })),
 ];
 
 const serviceOptions = [
   { value: 'all', label: 'All Services' },
   { value: 'standard', label: 'Standard' },
-  { value: 'express', label: 'Express' },
+  { value: 'priority', label: 'Priority' },
   { value: 'rush', label: 'Rush' },
-  { value: 'same_day', label: 'Same Day' },
   { value: 'scheduled', label: 'Scheduled' },
 ];
 
-const statusColors: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  assigned: 'bg-blue-100 text-blue-800 border-blue-200',
-  picked_up: 'bg-purple-100 text-purple-800 border-purple-200',
-  in_transit: 'bg-indigo-100 text-indigo-800 border-indigo-200',
-  delivered: 'bg-green-100 text-green-800 border-green-200',
-  cancelled: 'bg-red-100 text-red-800 border-red-200',
-};
-
 const statusIcons: Record<string, React.ComponentType<{ className?: string }>> = {
-  pending: AlertCircle,
+  quote_requested: AlertCircle,
+  quoted: AlertCircle,
+  booked: AlertCircle,
   assigned: User,
+  en_route_pickup: Truck,
+  arrived_pickup: MapPin,
   picked_up: Package,
-  in_transit: Truck,
+  en_route_delivery: Truck,
+  arrived_delivery: MapPin,
   delivered: CheckCircle,
   cancelled: XCircle,
+  failed: XCircle,
 };
 
 export default function DeliveriesPage() {
@@ -100,6 +98,7 @@ export default function DeliveriesPage() {
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
   const [assigning, setAssigning] = useState(false);
+  const [assignError, setAssignError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchDeliveries();
@@ -135,16 +134,16 @@ export default function DeliveriesPage() {
         delivery_address,
         pickup_contact_name,
         delivery_contact_name,
-        total_amount,
+        total_price,
         distance_miles,
         created_at,
-        scheduled_pickup,
+        pickup_window_start,
         driver_id,
         requires_signature,
         is_fragile,
         is_hipaa,
-        driver:drivers(profiles(full_name)),
-        customer:profiles!deliveries_customer_id_fkey(full_name),
+        driver:drivers!driver_id(profiles(full_name)),
+        customer:profiles!customer_id(full_name),
         broker_deliveries(broker:brokers(name, type))
       `)
       .order('created_at', { ascending: false })
@@ -171,10 +170,10 @@ export default function DeliveriesPage() {
           delivery_address: d.delivery_address,
           pickup_contact_name: d.pickup_contact_name,
           delivery_contact_name: d.delivery_contact_name,
-          total_amount: d.total_amount,
+          total_price: d.total_price,
           distance_miles: d.distance_miles,
           created_at: d.created_at,
-          scheduled_pickup: d.scheduled_pickup,
+          pickup_window_start: d.pickup_window_start,
           driver_id: d.driver_id,
           driver_name: d.driver?.profiles?.full_name || null,
           customer_name: d.customer?.full_name || null,
@@ -202,9 +201,8 @@ export default function DeliveriesPage() {
         current_delivery_id,
         profiles(full_name)
       `)
-      .eq('is_online', true)
       .eq('status', 'active')
-      .is('current_delivery_id', null);
+      .order('is_online', { ascending: false });
 
     if (data) {
       setAvailableDrivers(
@@ -223,9 +221,13 @@ export default function DeliveriesPage() {
     if (!selectedDelivery) return;
 
     setAssigning(true);
+    setAssignError(null);
     const supabase = createClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const previousDriverId = selectedDelivery.driver_id;
 
-    // Update delivery with driver assignment
+    // Update delivery with driver assignment. The status-change trigger logs
+    // the booked -> assigned transition in delivery_events automatically.
     const { error: deliveryError } = await supabase
       .from('deliveries')
       .update({
@@ -235,28 +237,66 @@ export default function DeliveriesPage() {
       })
       .eq('id', selectedDelivery.id);
 
-    if (!deliveryError) {
-      // Update driver's current delivery
+    if (deliveryError) {
+      setAssignError(deliveryError.message);
+      setAssigning(false);
+      return;
+    }
+
+    // Release the previous driver on a reassignment.
+    if (previousDriverId && previousDriverId !== driverId) {
       await supabase
         .from('drivers')
-        .update({ current_delivery_id: selectedDelivery.id })
-        .eq('id', driverId);
+        .update({ current_delivery_id: null })
+        .eq('id', previousDriverId)
+        .eq('current_delivery_id', selectedDelivery.id);
+    }
 
-      // Create delivery event
-      await supabase.from('delivery_events').insert({
-        delivery_id: selectedDelivery.id,
-        event_type: 'assigned',
-        description: 'Driver assigned by dispatcher',
-      });
+    const { error: driverError } = await supabase
+      .from('drivers')
+      .update({ current_delivery_id: selectedDelivery.id })
+      .eq('id', driverId);
 
+    // Record who assigned it (context the status trigger does not capture).
+    const { error: eventError } = await supabase.from('delivery_events').insert({
+      delivery_id: selectedDelivery.id,
+      event_type: 'driver_assigned',
+      old_status: selectedDelivery.status,
+      new_status: 'assigned',
+      notes: previousDriverId && previousDriverId !== driverId
+        ? 'Driver reassigned by dispatcher'
+        : 'Driver assigned by dispatcher',
+      created_by: user?.id ?? null,
+    });
+
+    if (driverError || eventError) {
+      // The assignment itself succeeded; surface the follow-up failure.
+      setAssignError(
+        `Driver assigned, but a follow-up update failed: ${(driverError || eventError)?.message}`
+      );
+    } else {
       setShowAssignModal(false);
       setSelectedDelivery(null);
-      fetchDeliveries();
-      fetchAvailableDrivers();
     }
+    fetchDeliveries();
+    fetchAvailableDrivers();
 
     setAssigning(false);
   };
+
+  // Open the assign modal when arriving from a detail page (?assign=<id>).
+  useEffect(() => {
+    if (typeof window === 'undefined' || deliveries.length === 0) return;
+    const assignId = new URLSearchParams(window.location.search).get('assign');
+    if (!assignId) return;
+    const target = deliveries.find((d) => d.id === assignId);
+    if (target && ASSIGNABLE_STATUSES.includes(target.status as any)) {
+      setSelectedDelivery(target);
+      setAssignError(null);
+      setShowAssignModal(true);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, [deliveries]);
 
   const filteredDeliveries = deliveries.filter((delivery) => {
     // Source filter
@@ -276,7 +316,7 @@ export default function DeliveriesPage() {
     );
   });
 
-  const pendingCount = deliveries.filter((d) => d.status === 'pending').length;
+  const pendingCount = deliveries.filter((d) => AWAITING_ASSIGNMENT_STATUSES.includes(d.status as any)).length;
 
   return (
     <div className="space-y-6">
@@ -312,7 +352,7 @@ export default function DeliveriesPage() {
             </div>
           </div>
           <button
-            onClick={() => setStatusFilter('pending')}
+            onClick={() => setStatusFilter('booked')}
             className="text-sm font-medium text-yellow-800 hover:text-yellow-900"
           >
             View Pending →
@@ -432,10 +472,10 @@ export default function DeliveriesPage() {
                       </td>
                       <td>
                         <span
-                          className={`status-badge border ${statusColors[delivery.status]}`}
+                          className={`status-badge border ${deliveryStatusBadge(delivery.status)}`}
                         >
                           <StatusIcon className="h-3 w-3 mr-1" />
-                          {delivery.status.replace('_', ' ')}
+                          {deliveryStatusLabel(delivery.status)}
                         </span>
                       </td>
                       <td>
@@ -474,7 +514,7 @@ export default function DeliveriesPage() {
                         )}
                       </td>
                       <td className="font-medium">
-                        {formatCurrency(delivery.total_amount / 100)}
+                        {delivery.total_price != null ? formatCurrency(delivery.total_price) : '-'}
                       </td>
                       <td>
                         <div className="flex items-center gap-2">
@@ -484,15 +524,16 @@ export default function DeliveriesPage() {
                           >
                             View
                           </Link>
-                          {delivery.status === 'pending' && (
+                          {ASSIGNABLE_STATUSES.includes(delivery.status as any) && (
                             <button
                               onClick={() => {
                                 setSelectedDelivery(delivery);
+                                setAssignError(null);
                                 setShowAssignModal(true);
                               }}
                               className="text-sm text-epyc-primary hover:text-blue-700 font-medium"
                             >
-                              Assign
+                              {delivery.driver_id ? 'Reassign' : 'Assign'}
                             </button>
                           )}
                         </div>
@@ -522,13 +563,19 @@ export default function DeliveriesPage() {
               <span className="font-medium">{selectedDelivery.tracking_number}</span>
             </p>
 
+            {assignError && (
+              <div className="mb-3 p-3 rounded-lg bg-red-50 text-sm text-red-700">
+                {assignError}
+              </div>
+            )}
+
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {availableDrivers.length === 0 ? (
                 <div className="text-center py-8">
                   <Truck className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                  <p className="text-sm text-gray-500">No drivers available</p>
+                  <p className="text-sm text-gray-500">No active drivers</p>
                   <p className="text-xs text-gray-400">
-                    All drivers are offline or on delivery
+                    Approve a driver on the Drivers or Applications page first
                   </p>
                 </div>
               ) : (
@@ -554,9 +601,13 @@ export default function DeliveriesPage() {
                         </p>
                       </div>
                     </div>
-                    <span className="text-xs text-green-600 font-medium">
-                      Available
-                    </span>
+                    {driver.current_delivery_id ? (
+                      <span className="text-xs text-orange-600 font-medium">On a job</span>
+                    ) : driver.is_online ? (
+                      <span className="text-xs text-green-600 font-medium">Online</span>
+                    ) : (
+                      <span className="text-xs text-gray-500 font-medium">Offline</span>
+                    )}
                   </button>
                 ))
               )}

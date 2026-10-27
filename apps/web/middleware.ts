@@ -53,6 +53,16 @@ export async function middleware(request: NextRequest) {
   // Driver portal protected routes
   const driverProtectedPaths = ['/driver/jobs', '/driver/active', '/driver/earnings', '/driver/profile', '/driver/delivery'];
   const isDriverProtected = driverProtectedPaths.some((path) => pathname.startsWith(path));
+  // The holding page for drivers awaiting approval. Needs a session, but is
+  // deliberately NOT in driverProtectedPaths so the approval gate below cannot
+  // redirect it to itself.
+  const isDriverPending = pathname === '/driver/pending';
+
+  if (isDriverPending && !user) {
+    const url = request.nextUrl.clone();
+    url.pathname = '/driver/login';
+    return NextResponse.redirect(url);
+  }
 
   if (isDriverProtected && !user) {
     const url = request.nextUrl.clone();
@@ -81,13 +91,21 @@ export async function middleware(request: NextRequest) {
 
     const { data: driver } = await supabase
       .from('drivers')
-      .select('id')
+      .select('id, status')
       .eq('profile_id', user.id)
       .maybeSingle();
 
     if (!driver) {
       const url = request.nextUrl.clone();
       url.pathname = '/driver/onboarding';
+      return NextResponse.redirect(url);
+    }
+
+    // Approval gate: only drivers dispatch has activated see jobs.
+    if (driver.status !== 'active') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/driver/pending';
+      url.search = '';
       return NextResponse.redirect(url);
     }
   }

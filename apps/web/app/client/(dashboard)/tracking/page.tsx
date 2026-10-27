@@ -19,9 +19,9 @@ async function getActiveDeliveries() {
     .select(
       `
       *,
-      driver:drivers(
+      driver:drivers!driver_id(
         id,
-        profiles:user_id(full_name, phone)
+        profiles:profile_id(full_name, phone)
       )
     `
     )

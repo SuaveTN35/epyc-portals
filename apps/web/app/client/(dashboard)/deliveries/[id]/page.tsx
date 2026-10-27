@@ -41,17 +41,16 @@ async function getDelivery(id: string) {
     .select(
       `
       *,
-      driver:drivers(
+      driver:drivers!driver_id(
         id,
-        user_id,
+        profile_id,
         vehicle_type,
         vehicle_make,
         vehicle_model,
-        vehicle_color,
-        license_plate,
+        vehicle_plate,
         rating,
         total_deliveries,
-        profiles:user_id(full_name, phone, avatar_url)
+        profiles:profile_id(full_name, phone, avatar_url)
       )
     `
     )
@@ -113,8 +112,8 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
         vehicle_type: delivery.driver.vehicle_type,
         vehicle_make: delivery.driver.vehicle_make,
         vehicle_model: delivery.driver.vehicle_model,
-        vehicle_color: delivery.driver.vehicle_color,
-        license_plate: delivery.driver.license_plate,
+        vehicle_color: null,
+        license_plate: delivery.driver.vehicle_plate,
         rating: delivery.driver.rating,
         total_deliveries: delivery.driver.total_deliveries,
       }

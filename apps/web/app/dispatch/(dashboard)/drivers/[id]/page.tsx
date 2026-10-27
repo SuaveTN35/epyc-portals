@@ -27,10 +27,11 @@ import {
   AlertCircle,
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
+import { toDriverDocumentPath } from '@/lib/delivery-status';
 
 interface DriverDetail {
   id: string;
-  user_id: string;
+  profile_id: string;
   full_name: string;
   email: string;
   phone: string;
@@ -38,17 +39,25 @@ interface DriverDetail {
   vehicle_make: string;
   vehicle_model: string;
   vehicle_year: number;
-  vehicle_color: string;
-  license_plate: string;
-  drivers_license_number: string;
-  drivers_license_expiry: string;
-  insurance_provider: string;
-  insurance_policy_number: string;
-  insurance_expiry: string;
+  vehicle_plate: string | null;
+  vehicle_vin: string | null;
+  license_number: string | null;
+  license_state: string | null;
+  license_expiry: string | null;
+  insurance_policy: string | null;
+  insurance_expiry: string | null;
+  background_check_status: string;
   status: string;
   is_online: boolean;
-  is_hipaa_certified: boolean;
-  has_cold_storage: boolean;
+  hipaa_certified: boolean;
+  has_temperature_control: boolean;
+  license_front_url: string | null;
+  license_back_url: string | null;
+  insurance_card_url: string | null;
+  registration_url: string | null;
+  vehicle_photo_front_url: string | null;
+  vehicle_photo_back_url: string | null;
+  vehicle_photo_side_url: string | null;
   current_delivery_id: string | null;
   total_deliveries: number;
   total_earnings: number;
@@ -66,7 +75,7 @@ interface DeliveryHistory {
   pickup_address: string;
   delivery_address: string;
   driver_payout: number;
-  delivered_at: string | null;
+  actual_delivery_time: string | null;
   created_at: string;
 }
 
@@ -103,6 +112,7 @@ export default function DriverDetailPage() {
     hoursActive: 0,
   });
   const [updating, setUpdating] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (params.id) {
@@ -134,8 +144,18 @@ export default function DriverDetailPage() {
 
       const availableBalance = payoutData?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
 
+      // Lifetime earnings: there is no stored total, so sum delivered payouts.
+      const { data: allDelivered } = await supabase
+        .from('deliveries')
+        .select('driver_payout, tip_amount')
+        .eq('driver_id', params.id)
+        .eq('status', 'delivered');
+      const totalEarnings =
+        allDelivered?.reduce((sum, d) => sum + (d.driver_payout || 0) + (d.tip_amount || 0), 0) || 0;
+
       setDriver({
         ...driverData,
+        total_earnings: totalEarnings,
         full_name: driverData.profiles?.full_name || 'Unknown Driver',
         email: driverData.profiles?.email || '',
         phone: driverData.profiles?.phone || '',
@@ -145,7 +165,7 @@ export default function DriverDetailPage() {
       // Fetch delivery history
       const { data: deliveries } = await supabase
         .from('deliveries')
-        .select('id, tracking_number, status, pickup_address, delivery_address, driver_payout, delivered_at, created_at')
+        .select('id, tracking_number, status, pickup_address, delivery_address, driver_payout, actual_delivery_time, created_at')
         .eq('driver_id', params.id)
         .order('created_at', { ascending: false })
         .limit(20);
@@ -160,15 +180,15 @@ export default function DriverDetailPage() {
 
       const { data: weekDeliveries } = await supabase
         .from('deliveries')
-        .select('driver_payout, delivered_at')
+        .select('driver_payout, actual_delivery_time')
         .eq('driver_id', params.id)
         .eq('status', 'delivered')
-        .gte('delivered_at', weekAgo.toISOString());
+        .gte('actual_delivery_time', weekAgo.toISOString());
 
       const { data: weekRatings } = await supabase
         .from('ratings')
         .select('rating')
-        .eq('driver_id', params.id)
+        .eq('rated_driver', params.id)
         .gte('created_at', weekAgo.toISOString());
 
       const weeklyEarnings = weekDeliveries?.reduce((sum, d) => sum + (d.driver_payout || 0), 0) || 0;
@@ -192,18 +212,55 @@ export default function DriverDetailPage() {
     if (newStatus === 'suspended' && !confirm('Are you sure you want to suspend this driver?')) return;
 
     setUpdating(true);
+    setActionError(null);
     const supabase = createClient();
 
-    await supabase
-      .from('drivers')
-      .update({
-        status: newStatus,
-        is_online: newStatus !== 'active' ? false : driver.is_online,
-      })
-      .eq('id', driver.id);
+    const patch: Record<string, unknown> = {
+      status: newStatus,
+      is_online: newStatus !== 'active' ? false : driver.is_online,
+    };
+    // Approval clears the background check gate as well.
+    if (newStatus === 'active' && driver.background_check_status !== 'approved') {
+      patch.background_check_status = 'approved';
+      patch.background_check_date = new Date().toISOString().slice(0, 10);
+    }
+
+    const { error } = await supabase.from('drivers').update(patch).eq('id', driver.id);
+    if (error) {
+      setActionError(`Could not update driver: ${error.message}`);
+    } else if (newStatus === 'active') {
+      // Keep the application queue in step with the driver record.
+      const { data: { user } } = await supabase.auth.getUser();
+      await supabase
+        .from('driver_applications')
+        .update({ status: 'approved', reviewed_by: user?.id ?? null, updated_at: new Date().toISOString() })
+        .eq('profile_id', driver.profile_id)
+        .in('status', ['pending_review', 'contacted', 'screening']);
+    }
 
     fetchDriverDetails();
     setUpdating(false);
+  };
+
+  const openDocument = async (stored: string | null) => {
+    const path = toDriverDocumentPath(stored);
+    if (!path) return;
+    setActionError(null);
+    try {
+      const res = await fetch('/api/documents/signed-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.url) {
+        setActionError('Could not open document.');
+        return;
+      }
+      window.open(data.url, '_blank', 'noopener,noreferrer');
+    } catch {
+      setActionError('Could not open document.');
+    }
   };
 
   if (loading) {
@@ -262,13 +319,13 @@ export default function DriverDetailPage() {
                   <Award className="h-3 w-3 mr-1" />
                   {driver.loyalty_tier}
                 </span>
-                {driver.is_hipaa_certified && (
+                {driver.hipaa_certified && (
                   <span className="status-badge bg-red-100 text-red-800">
                     <Shield className="h-3 w-3 mr-1" />
                     HIPAA
                   </span>
                 )}
-                {driver.has_cold_storage && (
+                {driver.has_temperature_control && (
                   <span className="status-badge bg-blue-100 text-blue-800">
                     <Snowflake className="h-3 w-3 mr-1" />
                     Cold Storage
@@ -288,7 +345,7 @@ export default function DriverDetailPage() {
               Approve Driver
             </button>
           )}
-          {driver.status === 'suspended' && (
+          {(driver.status === 'suspended' || driver.status === 'inactive') && (
             <button
               onClick={() => handleStatusChange('active')}
               disabled={updating}
@@ -308,6 +365,12 @@ export default function DriverDetailPage() {
           )}
         </div>
       </div>
+
+      {actionError && (
+        <div className="p-3 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">
+          {actionError}
+        </div>
+      )}
 
       {/* Stats cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -330,14 +393,14 @@ export default function DriverDetailPage() {
             <DollarSign className="h-4 w-4 text-green-500" />
             Total Earnings
           </div>
-          <p className="text-2xl font-bold">{formatCurrency(driver.total_earnings / 100)}</p>
+          <p className="text-2xl font-bold">{formatCurrency(driver.total_earnings)}</p>
         </div>
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
           <div className="flex items-center gap-2 text-gray-500 text-sm mb-1">
             <DollarSign className="h-4 w-4 text-blue-500" />
             Available Balance
           </div>
-          <p className="text-2xl font-bold">{formatCurrency(driver.available_balance / 100)}</p>
+          <p className="text-2xl font-bold">{formatCurrency(driver.available_balance)}</p>
         </div>
       </div>
 
@@ -354,7 +417,7 @@ export default function DriverDetailPage() {
               </div>
               <div className="text-center p-4 bg-gray-50 rounded-lg">
                 <p className="text-2xl font-bold text-green-600">
-                  {formatCurrency(weeklyStats.earnings / 100)}
+                  {formatCurrency(weeklyStats.earnings)}
                 </p>
                 <p className="text-sm text-gray-500">Earnings</p>
               </div>
@@ -418,10 +481,10 @@ export default function DriverDetailPage() {
                         </p>
                       </td>
                       <td className="font-medium text-green-600">
-                        {formatCurrency(delivery.driver_payout / 100)}
+                        {formatCurrency(delivery.driver_payout || 0)}
                       </td>
                       <td className="text-sm text-gray-500">
-                        {new Date(delivery.delivered_at || delivery.created_at).toLocaleDateString()}
+                        {new Date(delivery.actual_delivery_time || delivery.created_at).toLocaleDateString()}
                       </td>
                     </tr>
                   ))}
@@ -484,13 +547,15 @@ export default function DriverDetailPage() {
                 <span>{driver.vehicle_year}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-500">Color</span>
-                <span className="capitalize">{driver.vehicle_color}</span>
-              </div>
-              <div className="flex justify-between">
                 <span className="text-gray-500">License Plate</span>
-                <span className="font-mono">{driver.license_plate}</span>
+                <span className="font-mono">{driver.vehicle_plate || '-'}</span>
               </div>
+              {driver.vehicle_vin && (
+                <div className="flex justify-between">
+                  <span className="text-gray-500">VIN</span>
+                  <span className="font-mono text-xs">{driver.vehicle_vin}</span>
+                </div>
+              )}
             </div>
           </div>
 
@@ -500,11 +565,14 @@ export default function DriverDetailPage() {
             <div className="space-y-4">
               <div>
                 <p className="text-sm text-gray-500">Driver's License</p>
-                <p className="font-mono text-sm">{driver.drivers_license_number}</p>
-                <p className="text-xs text-gray-500">
-                  Expires: {new Date(driver.drivers_license_expiry).toLocaleDateString()}
+                <p className="font-mono text-sm">
+                  {driver.license_number || '-'}
+                  {driver.license_state ? ` (${driver.license_state})` : ''}
                 </p>
-                {new Date(driver.drivers_license_expiry) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) && (
+                <p className="text-xs text-gray-500">
+                  Expires: {driver.license_expiry ? new Date(driver.license_expiry).toLocaleDateString() : '-'}
+                </p>
+                {driver.license_expiry && new Date(driver.license_expiry) < new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) && (
                   <div className="flex items-center gap-1 text-xs text-yellow-600 mt-1">
                     <AlertCircle className="h-3 w-3" />
                     Expiring soon
@@ -513,11 +581,39 @@ export default function DriverDetailPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-500">Insurance</p>
-                <p className="text-sm">{driver.insurance_provider}</p>
-                <p className="font-mono text-xs">{driver.insurance_policy_number}</p>
+                <p className="font-mono text-xs">{driver.insurance_policy || '-'}</p>
                 <p className="text-xs text-gray-500">
-                  Expires: {new Date(driver.insurance_expiry).toLocaleDateString()}
+                  Expires: {driver.insurance_expiry ? new Date(driver.insurance_expiry).toLocaleDateString() : '-'}
                 </p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-2">Background check</p>
+                <p className="text-sm capitalize">{driver.background_check_status}</p>
+              </div>
+              <div>
+                <p className="text-sm text-gray-500 mb-2">Uploaded files</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { label: 'License front', value: driver.license_front_url },
+                    { label: 'License back', value: driver.license_back_url },
+                    { label: 'Insurance card', value: driver.insurance_card_url },
+                    { label: 'Registration', value: driver.registration_url },
+                    { label: 'Vehicle front', value: driver.vehicle_photo_front_url },
+                    { label: 'Vehicle back', value: driver.vehicle_photo_back_url },
+                    { label: 'Vehicle side', value: driver.vehicle_photo_side_url },
+                  ].map((doc) => (
+                    <button
+                      key={doc.label}
+                      type="button"
+                      disabled={!doc.value}
+                      onClick={() => openDocument(doc.value)}
+                      className="text-xs px-2.5 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center"
+                    >
+                      <FileText className="h-3.5 w-3.5 mr-1.5" />
+                      {doc.label}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

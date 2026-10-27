@@ -25,7 +25,7 @@ import { formatCurrency } from '@epyc/shared/utils';
 
 interface Driver {
   id: string;
-  user_id: string;
+  profile_id: string;
   full_name: string;
   email: string;
   phone: string;
@@ -33,11 +33,11 @@ interface Driver {
   vehicle_make: string;
   vehicle_model: string;
   vehicle_year: number;
-  license_plate: string;
+  vehicle_plate: string;
   status: string;
   is_online: boolean;
-  is_hipaa_certified: boolean;
-  has_cold_storage: boolean;
+  hipaa_certified: boolean;
+  has_temperature_control: boolean;
   current_delivery_id: string | null;
   total_deliveries: number;
   rating: number;
@@ -62,7 +62,6 @@ const vehicleOptions = [
   { value: 'van', label: 'Van' },
   { value: 'truck', label: 'Truck' },
   { value: 'box_truck', label: 'Box Truck' },
-  { value: 'motorcycle', label: 'Motorcycle' },
 ];
 
 const tierColors: Record<string, string> = {
@@ -116,16 +115,16 @@ export default function DriversPage() {
       .from('drivers')
       .select(`
         id,
-        user_id,
+        profile_id,
         vehicle_type,
         vehicle_make,
         vehicle_model,
         vehicle_year,
-        license_plate,
+        vehicle_plate,
         status,
         is_online,
-        is_hipaa_certified,
-        has_cold_storage,
+        hipaa_certified,
+        has_temperature_control,
         current_delivery_id,
         total_deliveries,
         rating,
@@ -158,7 +157,7 @@ export default function DriversPage() {
         .from('deliveries')
         .select('driver_id, driver_payout')
         .in('driver_id', driverIds)
-        .gte('delivered_at', today.toISOString())
+        .gte('actual_delivery_time', today.toISOString())
         .eq('status', 'delivered');
 
       const earningsByDriver: Record<string, number> = {};
@@ -172,7 +171,7 @@ export default function DriversPage() {
       setDrivers(
         driversData.map((d: any) => ({
           id: d.id,
-          user_id: d.user_id,
+          profile_id: d.profile_id,
           full_name: d.profiles?.full_name || 'Unknown Driver',
           email: d.profiles?.email || '',
           phone: d.profiles?.phone || '',
@@ -180,11 +179,11 @@ export default function DriversPage() {
           vehicle_make: d.vehicle_make,
           vehicle_model: d.vehicle_model,
           vehicle_year: d.vehicle_year,
-          license_plate: d.license_plate,
+          vehicle_plate: d.vehicle_plate,
           status: d.status,
           is_online: d.is_online,
-          is_hipaa_certified: d.is_hipaa_certified,
-          has_cold_storage: d.has_cold_storage,
+          hipaa_certified: d.hipaa_certified,
+          has_temperature_control: d.has_temperature_control,
           current_delivery_id: d.current_delivery_id,
           total_deliveries: d.total_deliveries,
           rating: d.rating,
@@ -201,20 +200,26 @@ export default function DriversPage() {
 
   const handleApproveDriver = async (driverId: string) => {
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
       .from('drivers')
-      .update({ status: 'active' })
+      .update({
+        status: 'active',
+        background_check_status: 'approved',
+        background_check_date: new Date().toISOString().slice(0, 10),
+      })
       .eq('id', driverId);
+    if (error) alert(`Could not approve driver: ${error.message}`);
     fetchDrivers();
   };
 
   const handleSuspendDriver = async (driverId: string) => {
     if (!confirm('Are you sure you want to suspend this driver?')) return;
     const supabase = createClient();
-    await supabase
+    const { error } = await supabase
       .from('drivers')
       .update({ status: 'suspended', is_online: false })
       .eq('id', driverId);
+    if (error) alert(`Could not suspend driver: ${error.message}`);
     fetchDrivers();
   };
 
@@ -225,7 +230,7 @@ export default function DriversPage() {
       driver.full_name.toLowerCase().includes(query) ||
       driver.email.toLowerCase().includes(query) ||
       driver.phone?.includes(query) ||
-      driver.license_plate?.toLowerCase().includes(query)
+      driver.vehicle_plate?.toLowerCase().includes(query)
     );
   });
 
@@ -402,13 +407,13 @@ export default function DriversPage() {
                 <span className={`status-badge ${tierColors[driver.loyalty_tier]}`}>
                   {driver.loyalty_tier}
                 </span>
-                {driver.is_hipaa_certified && (
+                {driver.hipaa_certified && (
                   <span className="status-badge bg-red-100 text-red-800">
                     <Shield className="h-3 w-3 mr-1" />
                     HIPAA
                   </span>
                 )}
-                {driver.has_cold_storage && (
+                {driver.has_temperature_control && (
                   <span className="status-badge bg-blue-100 text-blue-800">
                     <Snowflake className="h-3 w-3 mr-1" />
                     Cold
@@ -427,7 +432,7 @@ export default function DriversPage() {
                 <div className="text-right">
                   <p className="text-xs text-gray-500">Earned</p>
                   <p className="text-sm font-medium text-green-600">
-                    {formatCurrency(driver.earnings_today / 100)}
+                    {formatCurrency(driver.earnings_today)}
                   </p>
                 </div>
               </div>

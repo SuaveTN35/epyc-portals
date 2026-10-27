@@ -19,6 +19,12 @@ import {
   Link2,
 } from 'lucide-react';
 import { formatCurrency, formatDistance } from '@epyc/shared/utils';
+import {
+  ACTIVE_DELIVERY_STATUSES,
+  AWAITING_ASSIGNMENT_STATUSES,
+  deliveryStatusBadge,
+  deliveryStatusLabel,
+} from '@/lib/delivery-status';
 
 interface DashboardStats {
   activeDeliveries: number;
@@ -50,15 +56,6 @@ interface DriverStatus {
   completed_today: number;
 }
 
-const statusColors: Record<string, string> = {
-  pending: 'bg-yellow-100 text-yellow-800',
-  assigned: 'bg-blue-100 text-blue-800',
-  picked_up: 'bg-purple-100 text-purple-800',
-  in_transit: 'bg-indigo-100 text-indigo-800',
-  delivered: 'bg-green-100 text-green-800',
-  cancelled: 'bg-red-100 text-red-800',
-};
-
 export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<DashboardStats>({
@@ -86,7 +83,7 @@ export default function DashboardPage() {
       const { count: activeCount } = await supabase
         .from('deliveries')
         .select('*', { count: 'exact', head: true })
-        .in('status', ['assigned', 'picked_up', 'in_transit']);
+        .in('status', ACTIVE_DELIVERY_STATUSES);
 
       // Fetch online drivers count
       const { count: onlineCount } = await supabase
@@ -100,7 +97,7 @@ export default function DashboardPage() {
         .from('payments')
         .select('amount')
         .gte('created_at', today.toISOString())
-        .eq('status', 'completed');
+        .eq('status', 'succeeded');
 
       const todayRevenue = todayPayments?.reduce((sum, p) => sum + (p.amount || 0), 0) || 0;
 
@@ -108,14 +105,14 @@ export default function DashboardPage() {
       const { count: todayDeliveriesCount } = await supabase
         .from('deliveries')
         .select('*', { count: 'exact', head: true })
-        .gte('delivered_at', today.toISOString())
+        .gte('actual_delivery_time', today.toISOString())
         .eq('status', 'delivered');
 
       // Fetch pending assignments count
       const { count: pendingCount } = await supabase
         .from('deliveries')
         .select('*', { count: 'exact', head: true })
-        .eq('status', 'pending');
+        .in('status', AWAITING_ASSIGNMENT_STATUSES);
 
       // Fetch broker jobs today
       const { count: brokerJobsCount } = await supabase
@@ -126,16 +123,16 @@ export default function DashboardPage() {
       // Fetch average delivery time for today
       const { data: completedToday } = await supabase
         .from('deliveries')
-        .select('picked_up_at, delivered_at')
-        .gte('delivered_at', today.toISOString())
+        .select('actual_pickup_time, actual_delivery_time')
+        .gte('actual_delivery_time', today.toISOString())
         .eq('status', 'delivered')
-        .not('picked_up_at', 'is', null);
+        .not('actual_pickup_time', 'is', null);
 
       let avgTime = 0;
       if (completedToday && completedToday.length > 0) {
         const totalMinutes = completedToday.reduce((sum, d) => {
-          const pickup = new Date(d.picked_up_at!).getTime();
-          const delivery = new Date(d.delivered_at!).getTime();
+          const pickup = new Date(d.actual_pickup_time!).getTime();
+          const delivery = new Date(d.actual_delivery_time!).getTime();
           return sum + (delivery - pickup) / (1000 * 60);
         }, 0);
         avgTime = Math.round(totalMinutes / completedToday.length);
@@ -203,7 +200,7 @@ export default function DashboardPage() {
           .from('deliveries')
           .select('driver_id')
           .in('driver_id', driverIds)
-          .gte('delivered_at', today.toISOString())
+          .gte('actual_delivery_time', today.toISOString())
           .eq('status', 'delivered');
 
         const completedByDriver: Record<string, number> = {};
@@ -300,7 +297,7 @@ export default function DashboardPage() {
         />
         <StatCard
           title="Today's Revenue"
-          value={formatCurrency(stats.todayRevenue / 100)}
+          value={formatCurrency(stats.todayRevenue)}
           icon={DollarSign}
           color="emerald"
         />
@@ -371,9 +368,9 @@ export default function DashboardPage() {
                     </td>
                     <td>
                       <span
-                        className={`status-badge ${statusColors[delivery.status]}`}
+                        className={`status-badge ${deliveryStatusBadge(delivery.status)}`}
                       >
-                        {delivery.status.replace('_', ' ')}
+                        {deliveryStatusLabel(delivery.status)}
                       </span>
                     </td>
                     <td className="max-w-[200px]">

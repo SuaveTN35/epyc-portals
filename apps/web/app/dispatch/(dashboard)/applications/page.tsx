@@ -63,6 +63,7 @@ export default function DriverApplicationsPage() {
   const [statusFilter, setStatusFilter] = useState('pending_review');
   const [search, setSearch] = useState('');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const fetchApplications = useCallback(async () => {
     setLoading(true);
@@ -110,6 +111,65 @@ export default function DriverApplicationsPage() {
     if (updateError) {
       setError(updateError.message);
     }
+    setBusyId(null);
+    fetchApplications();
+  };
+
+  /**
+   * Approve an applicant: mark the application approved and, if they have
+   * finished onboarding stage 2 (a drivers row exists), activate the driver
+   * so the job board opens for them.
+   */
+  const approveApplication = async (a: DriverApplication) => {
+    if (!confirm(`Approve ${a.full_name || a.email || 'this applicant'} as a driver?`)) return;
+    setBusyId(a.id);
+    setError(null);
+    setNotice(null);
+
+    const { data: { user } } = await supabase.auth.getUser();
+    const now = new Date().toISOString();
+
+    const { error: appError } = await supabase
+      .from('driver_applications')
+      .update({ status: 'approved', reviewed_by: user?.id ?? null, updated_at: now })
+      .eq('id', a.id);
+
+    if (appError) {
+      setError(appError.message);
+      setBusyId(null);
+      return;
+    }
+
+    if (a.profile_id) {
+      const { data: driverRow, error: lookupError } = await supabase
+        .from('drivers')
+        .select('id')
+        .eq('profile_id', a.profile_id)
+        .maybeSingle();
+
+      if (lookupError) {
+        setError(`Application approved, but the driver record could not be checked: ${lookupError.message}`);
+      } else if (driverRow) {
+        const { error: driverError } = await supabase
+          .from('drivers')
+          .update({
+            status: 'active',
+            background_check_status: 'approved',
+            background_check_date: now.slice(0, 10),
+          })
+          .eq('id', driverRow.id);
+        if (driverError) {
+          setError(`Application approved, but activating the driver failed: ${driverError.message}`);
+        } else {
+          setNotice('Approved. The driver is active and can see the job board.');
+        }
+      } else {
+        setNotice(
+          'Application approved. This applicant has not finished vehicle and insurance onboarding yet; once they do, activate them on the Drivers page.'
+        );
+      }
+    }
+
     setBusyId(null);
     fetchApplications();
   };
@@ -183,6 +243,12 @@ export default function DriverApplicationsPage() {
       {error && (
         <div className="mb-5 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
           {error}
+        </div>
+      )}
+
+      {notice && (
+        <div className="mb-5 bg-green-50 border border-green-200 text-green-800 px-4 py-3 rounded-lg text-sm">
+          {notice}
         </div>
       )}
 
@@ -303,6 +369,15 @@ export default function DriverApplicationsPage() {
                           className="text-xs px-3 py-1.5 rounded-lg bg-epyc-primary text-white hover:bg-epyc-secondary disabled:opacity-50"
                         >
                           Mark Contacted
+                        </button>
+                      )}
+                      {['contacted', 'screening'].includes(a.status) && (
+                        <button
+                          disabled={busyId === a.id}
+                          onClick={() => approveApplication(a)}
+                          className="text-xs px-3 py-1.5 rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                        >
+                          Approve
                         </button>
                       )}
                       {['pending_review', 'contacted', 'screening'].includes(a.status) && (

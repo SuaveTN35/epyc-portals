@@ -102,7 +102,7 @@ export default function JobsPage() {
     // Update driver status
     await supabase
       .from('drivers')
-      .update({ is_online: newStatus })
+      .update({ is_online: newStatus, last_active_at: new Date().toISOString() })
       .eq('profile_id', user.id);
 
     setIsOnline(newStatus);

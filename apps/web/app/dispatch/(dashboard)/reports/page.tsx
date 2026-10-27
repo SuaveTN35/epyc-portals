@@ -85,17 +85,17 @@ export default function ReportsPage() {
     // Fetch delivered orders in date range
     const { data: deliveries } = await supabase
       .from('deliveries')
-      .select('id, total_amount, driver_payout, service_level, picked_up_at, delivered_at, created_at, driver_id')
+      .select('id, total_price, driver_payout, service_level, actual_pickup_time, actual_delivery_time, created_at, driver_id')
       .eq('status', 'delivered')
-      .gte('delivered_at', startDateStr);
+      .gte('actual_delivery_time', startDateStr);
 
     if (deliveries) {
       // Calculate totals
-      const totalRevenue = deliveries.reduce((sum, d) => sum + (d.total_amount || 0), 0);
+      const totalRevenue = deliveries.reduce((sum, d) => sum + (d.total_price || 0), 0);
       const avgTime = deliveries.reduce((sum, d) => {
-        if (d.picked_up_at && d.delivered_at) {
-          const pickup = new Date(d.picked_up_at).getTime();
-          const delivery = new Date(d.delivered_at).getTime();
+        if (d.actual_pickup_time && d.actual_delivery_time) {
+          const pickup = new Date(d.actual_pickup_time).getTime();
+          const delivery = new Date(d.actual_delivery_time).getTime();
           return sum + (delivery - pickup) / (1000 * 60);
         }
         return sum;
@@ -107,15 +107,15 @@ export default function ReportsPage() {
       // Calculate daily stats
       const dailyMap = new Map<string, { deliveries: number; revenue: number; totalTime: number; count: number }>();
       deliveries.forEach((d) => {
-        const date = new Date(d.delivered_at!).toISOString().split('T')[0];
+        const date = new Date(d.actual_delivery_time!).toISOString().split('T')[0];
         const existing = dailyMap.get(date) || { deliveries: 0, revenue: 0, totalTime: 0, count: 0 };
         let deliveryTime = 0;
-        if (d.picked_up_at && d.delivered_at) {
-          deliveryTime = (new Date(d.delivered_at).getTime() - new Date(d.picked_up_at).getTime()) / (1000 * 60);
+        if (d.actual_pickup_time && d.actual_delivery_time) {
+          deliveryTime = (new Date(d.actual_delivery_time).getTime() - new Date(d.actual_pickup_time).getTime()) / (1000 * 60);
         }
         dailyMap.set(date, {
           deliveries: existing.deliveries + 1,
-          revenue: existing.revenue + (d.total_amount || 0),
+          revenue: existing.revenue + (d.total_price || 0),
           totalTime: existing.totalTime + deliveryTime,
           count: existing.count + (deliveryTime > 0 ? 1 : 0),
         });
@@ -139,7 +139,7 @@ export default function ReportsPage() {
         const existing = serviceMap.get(service) || { count: 0, revenue: 0 };
         serviceMap.set(service, {
           count: existing.count + 1,
-          revenue: existing.revenue + (d.total_amount || 0),
+          revenue: existing.revenue + (d.total_price || 0),
         });
       });
 
@@ -161,13 +161,13 @@ export default function ReportsPage() {
 
       const { data: prevDeliveries } = await supabase
         .from('deliveries')
-        .select('id, total_amount')
+        .select('id, total_price')
         .eq('status', 'delivered')
-        .gte('delivered_at', prevStartDate.toISOString())
-        .lt('delivered_at', startDateStr);
+        .gte('actual_delivery_time', prevStartDate.toISOString())
+        .lt('actual_delivery_time', startDateStr);
 
       const prevCount = prevDeliveries?.length || 0;
-      const prevRevenue = prevDeliveries?.reduce((sum, d) => sum + (d.total_amount || 0), 0) || 0;
+      const prevRevenue = prevDeliveries?.reduce((sum, d) => sum + (d.total_price || 0), 0) || 0;
 
       const deliveriesChange = prevCount > 0
         ? Math.round(((deliveries.length - prevCount) / prevCount) * 100)
@@ -190,9 +190,9 @@ export default function ReportsPage() {
     // Fetch top drivers
     const { data: driverStats } = await supabase
       .from('deliveries')
-      .select('driver_id, driver_payout, driver:drivers(rating, profiles(full_name))')
+      .select('driver_id, driver_payout, driver:drivers!driver_id(rating, profiles(full_name))')
       .eq('status', 'delivered')
-      .gte('delivered_at', startDateStr)
+      .gte('actual_delivery_time', startDateStr)
       .not('driver_id', 'is', null);
 
     if (driverStats) {
@@ -233,7 +233,7 @@ export default function ReportsPage() {
     const rows = dailyStats.map((d) => [
       d.date,
       d.deliveries,
-      (d.revenue / 100).toFixed(2),
+      d.revenue.toFixed(2),
       d.avgDeliveryTime,
     ]);
 
@@ -295,7 +295,7 @@ export default function ReportsPage() {
         />
         <SummaryCard
           title="Total Revenue"
-          value={formatCurrency(totals.revenue / 100)}
+          value={formatCurrency(totals.revenue)}
           change={totals.revenueChange}
           icon={DollarSign}
           color="green"
@@ -341,7 +341,7 @@ export default function ReportsPage() {
                     <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 hidden group-hover:block bg-gray-900 text-white text-xs py-1 px-2 rounded whitespace-nowrap">
                       {day.deliveries} deliveries
                       <br />
-                      {formatCurrency(day.revenue / 100)}
+                      {formatCurrency(day.revenue)}
                     </div>
                   </div>
                   <span className="text-[10px] text-gray-400 mt-1 transform -rotate-45 origin-left">
@@ -379,7 +379,7 @@ export default function ReportsPage() {
                   />
                 </div>
                 <p className="text-xs text-gray-500 mt-1">
-                  {formatCurrency(service.revenue / 100)} revenue
+                  {formatCurrency(service.revenue)} revenue
                 </p>
               </div>
             ))}
@@ -423,7 +423,7 @@ export default function ReportsPage() {
                   <td className="font-medium">{driver.name}</td>
                   <td>{driver.deliveries}</td>
                   <td className="text-green-600 font-medium">
-                    {formatCurrency(driver.earnings / 100)}
+                    {formatCurrency(driver.earnings)}
                   </td>
                   <td>
                     <div className="flex items-center gap-1">
