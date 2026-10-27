@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import Stripe from 'stripe';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { formatCents, nextPaymentStatus, type PaymentStatus } from '@/lib/customer-delivery';
 
 // Lazy initialization to avoid build-time errors
 function getStripe() {
@@ -15,9 +16,13 @@ function getSupabase() {
 }
 
 export async function POST(request: NextRequest) {
+  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+  if (!webhookSecret || !process.env.STRIPE_SECRET_KEY) {
+    console.error('Stripe webhook is not configured (STRIPE_WEBHOOK_SECRET / STRIPE_SECRET_KEY)');
+    return NextResponse.json({ error: 'Webhook not configured' }, { status: 500 });
+  }
   const stripe = getStripe();
   const supabase = getSupabase();
-  const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET!;
 
   try {
     const body = await request.text();
@@ -76,131 +81,178 @@ export async function POST(request: NextRequest) {
   }
 }
 
+// Payment state lives in public.payments only. deliveries has no payment
+// columns live, and delivery_events has no description/metadata columns, so
+// the timeline gets event_type + notes. Live payments columns: id,
+// delivery_id, customer_id, stripe_payment_intent_id, stripe_charge_id,
+// amount, tip_amount, status, paid_at, created_at.
+
+interface PaymentRecord {
+  id: string;
+  delivery_id: string;
+  status: PaymentStatus | null;
+}
+
+/**
+ * Moves the payments row for a PaymentIntent to `status`. Creates the row
+ * when create-payment-intent never wrote one (or a later intent replaced it).
+ * Returns the delivery id when the status actually changed, so the caller
+ * logs one timeline event per real change even if Stripe retries.
+ */
+async function recordPaymentStatus(
+  supabase: SupabaseClient,
+  args: {
+    paymentIntentId: string;
+    deliveryIdHint: string | null;
+    status: PaymentStatus;
+    amountCents: number | null;
+    chargeId?: string | null;
+    paidAt?: string | null;
+  }
+): Promise<string | null> {
+  const { data: existing, error: readError } = await supabase
+    .from('payments')
+    .select('id, delivery_id, status')
+    .eq('stripe_payment_intent_id', args.paymentIntentId)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle<PaymentRecord>();
+  if (readError) {
+    throw new Error(`payments read failed: ${readError.message}`);
+  }
+
+  if (existing) {
+    const next = nextPaymentStatus(existing.status, args.status);
+    if (!next) return null;
+    const patch: Record<string, unknown> = { status: next };
+    if (args.chargeId) patch.stripe_charge_id = args.chargeId;
+    if (args.paidAt) patch.paid_at = args.paidAt;
+    const { error } = await supabase.from('payments').update(patch).eq('id', existing.id);
+    if (error) throw new Error(`payments update failed: ${error.message}`);
+    return existing.delivery_id;
+  }
+
+  if (!args.deliveryIdHint) {
+    console.error('No payments row and no delivery_id for intent', args.paymentIntentId);
+    return null;
+  }
+  // customer_id comes from the delivery, not from Stripe metadata.
+  const { data: delivery } = await supabase
+    .from('deliveries')
+    .select('id, customer_id')
+    .eq('id', args.deliveryIdHint)
+    .maybeSingle();
+  if (!delivery || args.amountCents == null) {
+    console.error('Cannot create payments row for intent', args.paymentIntentId);
+    return null;
+  }
+  const { error } = await supabase.from('payments').insert({
+    delivery_id: delivery.id,
+    customer_id: delivery.customer_id,
+    stripe_payment_intent_id: args.paymentIntentId,
+    stripe_charge_id: args.chargeId ?? null,
+    amount: args.amountCents / 100,
+    status: args.status,
+    paid_at: args.paidAt ?? null,
+  });
+  if (error) throw new Error(`payments insert failed: ${error.message}`);
+  return delivery.id;
+}
+
+async function logPaymentEvent(
+  supabase: SupabaseClient,
+  deliveryId: string,
+  eventType: 'payment_received' | 'payment_failed' | 'payment_refunded',
+  notes: string
+) {
+  const { error } = await supabase.from('delivery_events').insert({
+    delivery_id: deliveryId,
+    event_type: eventType,
+    notes,
+  });
+  if (error) {
+    console.error('delivery_events insert failed', { deliveryId, eventType, error: error.message });
+  }
+}
+
+function chargeIdOf(paymentIntent: Stripe.PaymentIntent): string | null {
+  const c = paymentIntent.latest_charge;
+  if (!c) return null;
+  return typeof c === 'string' ? c : c.id;
+}
+
 async function handlePaymentSuccess(
   supabase: SupabaseClient,
   paymentIntent: Stripe.PaymentIntent
 ) {
-  const deliveryId = paymentIntent.metadata?.delivery_id;
-
-  if (!deliveryId) {
-    console.error('No delivery_id in payment intent metadata');
-    return;
-  }
-
-  // Update payment record
-  const { error: paymentError } = await supabase
-    .from('payments')
-    .update({
-      status: 'succeeded',
-      payment_method: paymentIntent.payment_method_types?.[0] || 'card',
-      paid_at: new Date().toISOString(),
-    })
-    .eq('stripe_payment_intent_id', paymentIntent.id);
-
-  if (paymentError) {
-    console.error('Error updating payment:', paymentError);
-  }
-
-  // Update delivery status to confirmed/paid
-  const { error: deliveryError } = await supabase
-    .from('deliveries')
-    .update({
-      payment_status: 'paid',
-      paid_at: new Date().toISOString(),
-    })
-    .eq('id', deliveryId);
-
-  if (deliveryError) {
-    console.error('Error updating delivery:', deliveryError);
-  }
-
-  // Create delivery event
-  await supabase.from('delivery_events').insert({
-    delivery_id: deliveryId,
-    event_type: 'payment_received',
-    description: `Payment of $${(paymentIntent.amount / 100).toFixed(2)} received`,
-    metadata: {
-      payment_intent_id: paymentIntent.id,
-      amount: paymentIntent.amount,
-    },
+  const deliveryId = await recordPaymentStatus(supabase, {
+    paymentIntentId: paymentIntent.id,
+    deliveryIdHint: paymentIntent.metadata?.delivery_id ?? null,
+    status: 'succeeded',
+    amountCents: paymentIntent.amount_received || paymentIntent.amount,
+    chargeId: chargeIdOf(paymentIntent),
+    paidAt: new Date().toISOString(),
   });
-
-  console.log(`Payment succeeded for delivery ${deliveryId}`);
+  if (deliveryId) {
+    await logPaymentEvent(
+      supabase,
+      deliveryId,
+      'payment_received',
+      `Payment of ${formatCents(paymentIntent.amount_received || paymentIntent.amount)} received`
+    );
+  }
 }
 
 async function handlePaymentFailure(
   supabase: SupabaseClient,
   paymentIntent: Stripe.PaymentIntent
 ) {
-  const deliveryId = paymentIntent.metadata?.delivery_id;
-
-  // Update payment record
-  await supabase
-    .from('payments')
-    .update({
-      status: 'failed',
-      error_message: paymentIntent.last_payment_error?.message || 'Payment failed',
-    })
-    .eq('stripe_payment_intent_id', paymentIntent.id);
-
+  const deliveryId = await recordPaymentStatus(supabase, {
+    paymentIntentId: paymentIntent.id,
+    deliveryIdHint: paymentIntent.metadata?.delivery_id ?? null,
+    status: 'failed',
+    amountCents: paymentIntent.amount,
+  });
   if (deliveryId) {
-    // Create delivery event
-    await supabase.from('delivery_events').insert({
-      delivery_id: deliveryId,
-      event_type: 'payment_failed',
-      description: 'Payment attempt failed',
-      metadata: {
-        payment_intent_id: paymentIntent.id,
-        error: paymentIntent.last_payment_error?.message,
-      },
-    });
+    const reason = paymentIntent.last_payment_error?.message;
+    await logPaymentEvent(
+      supabase,
+      deliveryId,
+      'payment_failed',
+      reason ? `Payment attempt failed: ${reason}` : 'Payment attempt failed'
+    );
   }
-
-  console.log(`Payment failed for intent ${paymentIntent.id}`);
 }
 
-async function handleRefund(
-  supabase: SupabaseClient,
-  charge: Stripe.Charge
-) {
-  const paymentIntentId = charge.payment_intent as string;
-
+async function handleRefund(supabase: SupabaseClient, charge: Stripe.Charge) {
+  const paymentIntentId =
+    typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id;
   if (!paymentIntentId) return;
 
-  // Get the payment record
-  const { data: payment } = await supabase
-    .from('payments')
-    .select('delivery_id')
-    .eq('stripe_payment_intent_id', paymentIntentId)
-    .single();
+  const amount = formatCents(charge.amount_refunded);
 
-  // Update payment status
-  await supabase
-    .from('payments')
-    .update({
-      status: 'refunded',
-      refunded_at: new Date().toISOString(),
-    })
-    .eq('stripe_payment_intent_id', paymentIntentId);
-
-  if (payment?.delivery_id) {
-    // Update delivery payment status
-    await supabase
-      .from('deliveries')
-      .update({ payment_status: 'refunded' })
-      .eq('id', payment.delivery_id);
-
-    // Create delivery event
-    await supabase.from('delivery_events').insert({
-      delivery_id: payment.delivery_id,
-      event_type: 'payment_refunded',
-      description: `Refund of $${(charge.amount_refunded / 100).toFixed(2)} processed`,
-      metadata: {
-        charge_id: charge.id,
-        amount_refunded: charge.amount_refunded,
-      },
-    });
+  // Partial refund: the payment still stands; note it on the timeline only.
+  if (!charge.refunded) {
+    const { data: payment } = await supabase
+      .from('payments')
+      .select('delivery_id')
+      .eq('stripe_payment_intent_id', paymentIntentId)
+      .limit(1)
+      .maybeSingle();
+    if (payment?.delivery_id) {
+      await logPaymentEvent(supabase, payment.delivery_id, 'payment_refunded', `Partial refund of ${amount} processed`);
+    }
+    return;
   }
 
-  console.log(`Refund processed for charge ${charge.id}`);
+  const deliveryId = await recordPaymentStatus(supabase, {
+    paymentIntentId,
+    deliveryIdHint: charge.metadata?.delivery_id ?? null,
+    status: 'refunded',
+    amountCents: charge.amount,
+    chargeId: charge.id,
+  });
+  if (deliveryId) {
+    await logPaymentEvent(supabase, deliveryId, 'payment_refunded', `Refund of ${amount} processed`);
+  }
 }

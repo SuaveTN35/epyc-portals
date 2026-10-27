@@ -4,6 +4,7 @@ import { createClient as createServerClient } from '@/lib/supabase/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit, rateLimitHeaders, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { createPaymentIntentSchema, validateRequest } from '@/lib/validations';
+import { chargeCents } from '@/lib/customer-delivery';
 
 function getStripe() {
   if (!process.env.STRIPE_SECRET_KEY) {
@@ -84,6 +85,24 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // The charge is the stored delivery total, never a client-supplied number.
+    // The client still sends amount; a mismatch means a stale quote screen.
+    // One cent of slack covers float rounding of an unrounded quote total
+    // against the numeric(10,2) column.
+    const cents = chargeCents(delivery.total_price);
+    if (cents == null) {
+      return NextResponse.json(
+        { error: 'This delivery has no price yet. Call (818) 217-0070.' },
+        { status: 400 }
+      );
+    }
+    if (Math.abs(amount - cents) > 1) {
+      return NextResponse.json(
+        { error: 'The price changed. Go back and review the quote.' },
+        { status: 409 }
+      );
+    }
+
     // Get or create Stripe customer
     let stripeCustomerId: string;
 
@@ -115,14 +134,15 @@ export async function POST(request: NextRequest) {
 
     // Create payment intent
     const paymentIntent = await stripe.paymentIntents.create({
-      amount,
+      amount: cents,
       currency: 'usd',
       customer: stripeCustomerId,
+      // Server values last so request metadata cannot repoint the webhook.
       metadata: {
+        ...metadata,
         delivery_id,
         tracking_number: delivery.tracking_number,
         user_id: user.id,
-        ...metadata,
       },
       automatic_payment_methods: {
         enabled: true,
@@ -130,15 +150,34 @@ export async function POST(request: NextRequest) {
       description: `EPYC Courier - Delivery ${delivery.tracking_number}`,
     });
 
-    // Create payment record in database (use service role to bypass RLS)
+    // Payment state lives in public.payments (live columns: delivery_id,
+    // customer_id, stripe_payment_intent_id, stripe_charge_id, amount,
+    // tip_amount, status, paid_at, created_at). Reuse an open row for this
+    // delivery so revisiting the payment step does not pile up rows.
     const serviceSupabase = getServiceSupabase();
-    await serviceSupabase.from('payments').insert({
-      delivery_id,
-      customer_id: user.id,
-      amount: amount / 100, // Convert cents to dollars for storage
+    const { data: openPayment } = await serviceSupabase
+      .from('payments')
+      .select('id')
+      .eq('delivery_id', delivery_id)
+      .eq('customer_id', user.id)
+      .in('status', ['pending', 'failed'])
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const paymentRow = {
+      amount: cents / 100,
       status: 'pending',
       stripe_payment_intent_id: paymentIntent.id,
-    });
+    };
+    const { error: paymentError } = openPayment
+      ? await serviceSupabase.from('payments').update(paymentRow).eq('id', openPayment.id)
+      : await serviceSupabase
+          .from('payments')
+          .insert({ ...paymentRow, delivery_id, customer_id: user.id });
+    if (paymentError) {
+      console.error('payments write failed', { delivery_id, error: paymentError.message });
+    }
 
     return NextResponse.json({
       clientSecret: paymentIntent.client_secret,

@@ -17,6 +17,7 @@ import {
 import { createClient } from '@/lib/supabase/client';
 import { AddressAutocomplete } from '@/components/ui/AddressAutocomplete';
 import { PaymentStep } from '@/components/booking/PaymentStep';
+import { buildCustomerBookingRow } from '@/lib/customer-booking';
 import {
   SERVICE_LEVEL_CONFIG,
   VEHICLE_CONFIG,
@@ -242,63 +243,20 @@ export default function NewDeliveryPage() {
 
     const newTrackingNumber = generateTrackingNumber();
 
+    // Only live columns; payment state is tracked in the payments table.
     const { data: insertedDelivery, error: insertError } = await supabase
       .from('deliveries')
-      .insert({
-        tracking_number: newTrackingNumber,
-        customer_id: user.id,
-        status: 'booked',
-        payment_status: 'pending',
-        // Pickup
-        pickup_address: formData.pickup_address,
-        pickup_city: formData.pickup_city,
-        pickup_state: formData.pickup_state,
-        pickup_zip: formData.pickup_zip,
-        pickup_lat: pickupCoords?.lat,
-        pickup_lng: pickupCoords?.lng,
-        pickup_contact_name: formData.pickup_contact_name,
-        pickup_contact_phone: formData.pickup_contact_phone,
-        pickup_instructions: formData.pickup_instructions,
-        // Delivery
-        delivery_address: formData.delivery_address,
-        delivery_city: formData.delivery_city,
-        delivery_state: formData.delivery_state,
-        delivery_zip: formData.delivery_zip,
-        delivery_lat: deliveryCoords?.lat,
-        delivery_lng: deliveryCoords?.lng,
-        delivery_contact_name: formData.delivery_contact_name,
-        delivery_contact_phone: formData.delivery_contact_phone,
-        delivery_instructions: formData.delivery_instructions,
-        // Package
-        package_description: formData.package_description,
-        package_weight: formData.package_weight,
-        package_length: formData.package_length,
-        package_width: formData.package_width,
-        package_height: formData.package_height,
-        requires_signature: formData.requires_signature,
-        is_fragile: formData.is_fragile,
-        is_medical: formData.is_medical,
-        is_hipaa: formData.is_hipaa,
-        requires_temperature_control: formData.requires_temperature_control,
-        temperature_min: formData.requires_temperature_control ? formData.temperature_min : null,
-        temperature_max: formData.requires_temperature_control ? formData.temperature_max : null,
-        // Pricing
-        distance_miles: quote.distance_miles,
-        estimated_duration_minutes: quote.estimated_duration_minutes,
-        base_price: quote.base_price,
-        distance_price: quote.distance_price,
-        weight_surcharge: quote.weight_surcharge,
-        rush_surcharge: quote.rush_surcharge,
-        hipaa_surcharge: quote.hipaa_surcharge,
-        temperature_surcharge: quote.temperature_surcharge,
-        total_price: quote.total_price,
-        driver_payout: quote.driver_payout,
-        // Service
-        service_level: formData.service_level,
-        vehicle_required: quote.vehicle_required,
-        booked_at: new Date().toISOString(),
-      })
-      .select('id')
+      .insert(
+        buildCustomerBookingRow({
+          customerId: user.id,
+          trackingNumber: newTrackingNumber,
+          form: formData,
+          quote,
+          pickup: pickupCoords,
+          dropoff: deliveryCoords,
+        })
+      )
+      .select('id, tracking_number')
       .single();
 
     if (insertError || !insertedDelivery) {
@@ -309,7 +267,7 @@ export default function NewDeliveryPage() {
 
     // Store delivery info and proceed to payment
     setDeliveryId(insertedDelivery.id);
-    setTrackingNumber(newTrackingNumber);
+    setTrackingNumber(insertedDelivery.tracking_number || newTrackingNumber);
     setLoading(false);
     setStep('payment');
   };
@@ -809,7 +767,7 @@ export default function NewDeliveryPage() {
                 <p className="text-sm font-medium text-cyan-800 mb-2">Temperature Range</p>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs text-cyan-600 mb-1">Min (°C)</label>
+                    <label className="block text-xs text-cyan-600 mb-1">Min (C)</label>
                     <input
                       type="number"
                       name="temperature_min"
@@ -819,7 +777,7 @@ export default function NewDeliveryPage() {
                     />
                   </div>
                   <div>
-                    <label className="block text-xs text-cyan-600 mb-1">Max (°C)</label>
+                    <label className="block text-xs text-cyan-600 mb-1">Max (C)</label>
                     <input
                       type="number"
                       name="temperature_max"
