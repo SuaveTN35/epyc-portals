@@ -372,7 +372,7 @@ export default function DeliveriesPage() {
             onClick={() => setStatusFilter('booked')}
             className="text-sm font-medium text-yellow-800 hover:text-yellow-900"
           >
-            View Pending →
+            View Pending {'->'}
           </button>
         </div>
       )}
@@ -511,7 +511,7 @@ export default function DeliveriesPage() {
                               {delivery.pickup_address.split(',')[0]}
                             </p>
                             <p className="text-xs text-gray-700 truncate">
-                              → {delivery.delivery_address.split(',')[0]}
+                              {'->'} {delivery.delivery_address.split(',')[0]}
                             </p>
                           </div>
                         </div>

@@ -22,6 +22,8 @@ interface ProofPhotoCaptureProps {
   photos: CapturedPhoto[];
   onChange: (photos: CapturedPhoto[]) => void;
   disabled?: boolean;
+  /** Override the storage path (must still start with `<deliveryId>/`). */
+  pathFor?: () => string;
 }
 
 /**
@@ -41,6 +43,7 @@ export function ProofPhotoCapture({
   photos,
   onChange,
   disabled,
+  pathFor,
 }: ProofPhotoCaptureProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -70,7 +73,7 @@ export function ProofPhotoCapture({
     setUploading(true);
     try {
       const prepared = await shrinkImage(file);
-      const path = proofPhotoPath(deliveryId, stage, kind);
+      const path = pathFor ? pathFor() : proofPhotoPath(deliveryId, stage, kind);
       const supabase = createClient();
       const { error: uploadError } = await supabase.storage
         .from('delivery-photos')

@@ -580,12 +580,12 @@ export default function DeliveryDetailPage() {
                   <span className="font-medium text-blue-900">Temperature Requirements</span>
                 </div>
                 <p className="text-sm text-blue-800">
-                  {delivery.temperature_min}°F - {delivery.temperature_max}°F
+                  {delivery.temperature_min} F - {delivery.temperature_max} F
                 </p>
                 {temperatureLogs.length > 0 && (
                   <div className="mt-2">
                     <p className="text-xs text-blue-700">
-                      Latest reading: {temperatureLogs[0].temperature}°F at{' '}
+                      Latest reading: {temperatureLogs[0].temperature} F at{' '}
                       {new Date(temperatureLogs[0].recorded_at).toLocaleTimeString()}
                     </p>
                   </div>

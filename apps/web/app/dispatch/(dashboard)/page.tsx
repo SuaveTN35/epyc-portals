@@ -388,7 +388,7 @@ export default function DashboardPage() {
                         {delivery.pickup_address.split(',')[0]}
                       </div>
                       <div className="text-xs text-gray-700 truncate">
-                        → {delivery.delivery_address.split(',')[0]}
+                        {'->'} {delivery.delivery_address.split(',')[0]}
                       </div>
                     </td>
                     <td>

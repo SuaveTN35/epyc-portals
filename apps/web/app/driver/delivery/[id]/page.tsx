@@ -6,8 +6,7 @@ import { createClient } from '@/lib/supabase/client';
 import {
   Navigation,
   Phone,
-  MessageSquare,
-  Camera,
+  HelpCircle,
   Pencil,
   CheckCircle,
   MapPin,
@@ -34,17 +33,56 @@ import {
   type LeftWith,
 } from '@/lib/proof-flow';
 import { ProofPhotoCapture, type CapturedPhoto } from '@/components/driver/ProofPhotoCapture';
+import { OfflineBanner } from '@/components/driver/OfflineBanner';
+import { CopyButton } from '@/components/driver/CopyButton';
+import { JobDetailsCard } from '@/components/driver/JobDetailsCard';
+import { ReleaseJobSheet } from '@/components/driver/ReleaseJobSheet';
+import { ReportProblemSheet } from '@/components/driver/ReportProblemSheet';
+import {
+  EPYC_DISPATCH_PHONE_TEL,
+  MAP_APPS,
+  MAP_APP_STORAGE_KEY,
+  isBeforeReadyTime,
+  isReleasable,
+  navUrl,
+  parseMapApp,
+  readyTimeLabel,
+  type MapApp,
+} from '@/lib/driver-job';
+
+// Live columns not on the shared Delivery type.
+type DriverDelivery = Delivery & { source_reference?: string | null };
 
 export default function DeliveryDetailPage() {
   const params = useParams();
   const router = useRouter();
   const deliveryId = params.id as string;
 
-  const [delivery, setDelivery] = useState<Delivery | null>(null);
+  const [delivery, setDelivery] = useState<DriverDelivery | null>(null);
   const [loading, setLoading] = useState(true);
   const [updating, setUpdating] = useState(false);
   const [showTempSheet, setShowTempSheet] = useState(false);
   const [showNavSheet, setShowNavSheet] = useState(false);
+  const [showReleaseSheet, setShowReleaseSheet] = useState(false);
+  const [showProblemSheet, setShowProblemSheet] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [mapApp, setMapApp] = useState<MapApp | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+
+  // Preferred map app, chosen once and remembered on this phone.
+  useEffect(() => {
+    try {
+      setMapApp(parseMapApp(window.localStorage.getItem(MAP_APP_STORAGE_KEY)));
+    } catch {
+      // Private mode or storage disabled: ask each time.
+    }
+  }, []);
+
+  // Re-check the ready-time gate every 30 seconds.
+  useEffect(() => {
+    const t = setInterval(() => setNowMs(Date.now()), 30000);
+    return () => clearInterval(t);
+  }, []);
   const [statusError, setStatusError] = useState<string | null>(null);
 
   const supabase = createClient();
@@ -56,7 +94,7 @@ export default function DeliveryDetailPage() {
       .eq('id', deliveryId)
       .single();
 
-    setDelivery(data as Delivery);
+    setDelivery(data as DriverDelivery);
     setLoading(false);
   };
 
@@ -75,7 +113,7 @@ export default function DeliveryDetailPage() {
           filter: `id=eq.${deliveryId}`,
         },
         (payload) => {
-          setDelivery(payload.new as Delivery);
+          setDelivery(payload.new as DriverDelivery);
         }
       )
       .subscribe();
@@ -151,40 +189,25 @@ export default function DeliveryDetailPage() {
     return null;
   };
 
-  const openNavigation = (app: 'google' | 'apple' | 'waze') => {
-    const address = getNavigationAddress();
-    const coords = getNavigationCoords();
-
-    let url = '';
-
-    switch (app) {
-      case 'google':
-        if (coords) {
-          url = `https://www.google.com/maps/dir/?api=1&destination=${coords.lat},${coords.lng}`;
-        } else {
-          url = `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`;
-        }
-        break;
-
-      case 'apple':
-        if (coords) {
-          url = `https://maps.apple.com/?daddr=${coords.lat},${coords.lng}`;
-        } else {
-          url = `https://maps.apple.com/?daddr=${encodeURIComponent(address)}`;
-        }
-        break;
-
-      case 'waze':
-        if (coords) {
-          url = `https://waze.com/ul?ll=${coords.lat},${coords.lng}&navigate=yes`;
-        } else {
-          url = `https://waze.com/ul?q=${encodeURIComponent(address)}&navigate=yes`;
-        }
-        break;
-    }
-
-    window.open(url, '_blank');
+  const openNavigation = (app: MapApp) => {
+    window.open(navUrl(app, getNavigationAddress(), getNavigationCoords()), '_blank');
     setShowNavSheet(false);
+  };
+
+  // Start Nav: open the remembered app directly, or ask once.
+  const startNav = () => {
+    if (mapApp) openNavigation(mapApp);
+    else setShowNavSheet(true);
+  };
+
+  const chooseMapApp = (app: MapApp) => {
+    setMapApp(app);
+    try {
+      window.localStorage.setItem(MAP_APP_STORAGE_KEY, app);
+    } catch {
+      // Not remembered; still navigate.
+    }
+    openNavigation(app);
   };
 
   if (loading) {
@@ -210,21 +233,25 @@ export default function DeliveryDetailPage() {
   const currentLocation = isPickupPhase
     ? {
         address: delivery.pickup_address,
-        city: `${delivery.pickup_city}, ${delivery.pickup_state}`,
-        contact: delivery.pickup_contact_name,
-        phone: delivery.pickup_contact_phone,
-        instructions: delivery.pickup_instructions,
+        city: `${delivery.pickup_city}, ${delivery.pickup_state} ${delivery.pickup_zip}`,
       }
     : {
         address: delivery.delivery_address,
-        city: `${delivery.delivery_city}, ${delivery.delivery_state}`,
-        contact: delivery.delivery_contact_name,
-        phone: delivery.delivery_contact_phone,
-        instructions: delivery.delivery_instructions,
+        city: `${delivery.delivery_city}, ${delivery.delivery_state} ${delivery.delivery_zip}`,
       };
+
+  const tooEarly =
+    step === 'to_pickup' && isBeforeReadyTime(delivery.pickup_window_start, new Date(nowMs));
+  const pickupReference =
+    (step === 'to_pickup' || step === 'pickup_proof') && delivery.source_reference
+      ? delivery.source_reference
+      : null;
+  const otherMapApps = MAP_APPS.filter((a) => a.id !== mapApp);
 
   return (
     <div className="min-h-screen bg-gray-100 pb-32">
+      <OfflineBanner />
+
       {/* Header */}
       <header className="bg-epyc-primary text-white px-4 py-3 safe-area-top sticky top-0 z-10">
         <div className="flex items-center justify-between">
@@ -232,24 +259,31 @@ export default function DeliveryDetailPage() {
             <X className="h-6 w-6" />
           </button>
           <span className="font-medium">{delivery.tracking_number}</span>
-          <div className={`px-2 py-1 rounded-full text-xs ${statusConfig.bgColor} ${statusConfig.color}`}>
-            {statusConfig.label}
+          <div className="flex items-center gap-2">
+            <a href="/driver/help" className="p-1" aria-label="Driver help">
+              <HelpCircle className="h-5 w-5" />
+            </a>
+            <div className={`px-2 py-1 rounded-full text-xs ${statusConfig.bgColor} ${statusConfig.color}`}>
+              {statusConfig.label}
+            </div>
           </div>
         </div>
       </header>
 
       {/* Map Placeholder */}
-      <div className="h-48 bg-gray-300 relative">
+      <div className="h-40 bg-gray-300 relative">
         <div className="absolute inset-0 flex items-center justify-center">
           <p className="text-gray-500">Map View</p>
         </div>
-        <button
-          onClick={() => setShowNavSheet(true)}
-          className="absolute bottom-4 right-4 bg-epyc-primary text-white px-4 py-2 rounded-lg flex items-center shadow-lg"
-        >
-          <Navigation className="h-5 w-5 mr-2" />
-          Navigate
-        </button>
+        {step !== 'done' && (
+          <button
+            onClick={startNav}
+            className="absolute bottom-4 right-4 bg-epyc-primary text-white px-4 py-2 rounded-lg flex items-center shadow-lg"
+          >
+            <Navigation className="h-5 w-5 mr-2" />
+            Start Nav
+          </button>
+        )}
       </div>
 
       {/* Current Destination Card */}
@@ -257,7 +291,7 @@ export default function DeliveryDetailPage() {
         <div className="flex items-start justify-between">
           <div>
             <p className="text-xs text-gray-500 uppercase tracking-wide mb-1">
-              {isPickupPhase ? 'PICKUP LOCATION' : 'DELIVERY LOCATION'}
+              {isPickupPhase ? 'PICKUP LOCATION' : 'DROP-OFF LOCATION'}
             </p>
             <p className="font-semibold text-gray-900">{currentLocation.address}</p>
             <p className="text-sm text-gray-500">{currentLocation.city}</p>
@@ -266,125 +300,67 @@ export default function DeliveryDetailPage() {
             <MapPin className={`h-5 w-5 ${isPickupPhase ? 'text-blue-600' : 'text-green-600'}`} />
           </div>
         </div>
-
-        {/* Contact */}
-        {currentLocation.contact && (
-          <div className="mt-4 pt-4 border-t border-gray-100">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-900">{currentLocation.contact}</p>
-                <p className="text-sm text-gray-500">{currentLocation.phone}</p>
-              </div>
-              <div className="flex space-x-2">
-                {currentLocation.phone && (
-                  <a
-                    href={`tel:${currentLocation.phone}`}
-                    className="p-3 bg-gray-100 rounded-full touch-target"
-                  >
-                    <Phone className="h-5 w-5 text-gray-600" />
-                  </a>
-                )}
-                <button className="p-3 bg-gray-100 rounded-full touch-target">
-                  <MessageSquare className="h-5 w-5 text-gray-600" />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Instructions */}
-        {currentLocation.instructions && (
-          <div className="mt-4 bg-yellow-50 rounded-lg p-3">
-            <p className="text-sm text-yellow-800">
-              <span className="font-medium">Instructions: </span>
-              {currentLocation.instructions}
-            </p>
-          </div>
-        )}
       </div>
 
-      {/* Package Details */}
-      <div className="bg-white mx-4 mt-4 rounded-xl shadow-sm p-4">
-        <h3 className="font-semibold text-gray-900 mb-3">Package Details</h3>
-        <div className="space-y-2 text-sm">
-          {delivery.package_description && (
-            <div className="flex items-start">
-              <Package className="h-4 w-4 text-gray-400 mr-2 mt-0.5" />
-              <span className="text-gray-700">{delivery.package_description}</span>
-            </div>
-          )}
-          {delivery.package_weight && (
-            <div className="flex items-center text-gray-500">
-              <span className="w-20">Weight:</span>
-              <span className="text-gray-900">{delivery.package_weight} lbs</span>
-            </div>
-          )}
-          {delivery.requires_signature && (
-            <div className="flex items-center text-blue-600">
-              <Pencil className="h-4 w-4 mr-2" />
-              Signature required
-            </div>
-          )}
-          {delivery.is_hipaa && (
-            <div className="flex items-center text-green-600">
-              <CheckCircle className="h-4 w-4 mr-2" />
-              HIPAA compliant - chain of custody required
-            </div>
-          )}
-          {delivery.requires_temperature_control && (
-            <div className="flex items-center text-cyan-600">
-              <Thermometer className="h-4 w-4 mr-2" />
-              Temperature: {delivery.temperature_min}°C - {delivery.temperature_max}°C
-              <button
-                onClick={() => setShowTempSheet(true)}
-                className="ml-2 text-xs bg-cyan-100 px-2 py-1 rounded"
-              >
-                Log Temp
-              </button>
-            </div>
-          )}
+      {notice && (
+        <div className="mx-4 mt-4 bg-green-50 border border-green-200 text-green-800 text-sm rounded-lg p-3 flex justify-between">
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="underline ml-2">
+            OK
+          </button>
         </div>
-      </div>
-
-      {/* Payout */}
-      <div className="bg-white mx-4 mt-4 rounded-xl shadow-sm p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-gray-500">Your payout</span>
-          <span className="text-xl font-bold text-epyc-primary">
-            {formatCurrency(delivery.driver_payout || 0)}
-          </span>
-        </div>
-        {delivery.tip_amount && delivery.tip_amount > 0 && (
-          <div className="flex items-center justify-between mt-2 text-sm">
-            <span className="text-gray-500">+ Tip</span>
-            <span className="text-green-600 font-medium">
-              {formatCurrency(delivery.tip_amount)}
-            </span>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Next step */}
       <div className="bg-white mx-4 mt-4 rounded-xl shadow-sm p-4">
+        {pickupReference && (
+          <div className="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <p className="text-xs text-blue-800 uppercase tracking-wide">Pickup reference #</p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-2xl font-bold text-blue-900 break-all">{pickupReference}</p>
+              <CopyButton value={pickupReference} label="Copy" />
+            </div>
+            <p className="text-xs text-blue-800 mt-1">Give this number to the store.</p>
+          </div>
+        )}
+
         {(step === 'to_pickup' || step === 'to_dropoff') && (
           <div className="space-y-3">
             <h3 className="font-semibold text-gray-900">
               {step === 'to_pickup' ? 'Step 1: Go to pickup' : 'Step 3: Go to drop-off'}
             </h3>
+            {tooEarly && delivery.pickup_window_start && (
+              <div className="bg-red-600 text-white rounded-lg p-3 text-sm font-semibold">
+                Not ready before: {readyTimeLabel(delivery.pickup_window_start)}
+              </div>
+            )}
             <button
-              onClick={() => setShowNavSheet(true)}
+              onClick={startNav}
               className="w-full py-4 border-2 border-epyc-primary text-epyc-primary rounded-xl font-semibold text-lg flex items-center justify-center touch-target"
             >
               <Navigation className="h-6 w-6 mr-2" />
               {step === 'to_pickup' ? 'Navigate to pickup' : 'Navigate to drop-off'}
             </button>
+            <div className="flex flex-wrap justify-center gap-x-4 gap-y-1 text-sm">
+              {mapApp &&
+                otherMapApps.map((a) => (
+                  <button key={a.id} onClick={() => openNavigation(a.id)} className="text-epyc-primary underline">
+                    {a.name}
+                  </button>
+                ))}
+              <button onClick={() => setShowNavSheet(true)} className="text-gray-500 underline">
+                {mapApp ? 'Change map app' : 'Choose map app'}
+              </button>
+            </div>
             <button
               onClick={() => arrive(step === 'to_pickup' ? 'arrived_pickup' : 'arrived_delivery')}
-              disabled={updating}
+              disabled={updating || tooEarly}
               className="w-full py-4 bg-epyc-primary text-white rounded-xl font-semibold text-lg flex items-center justify-center touch-target disabled:opacity-50"
             >
               {updating ? (
                 <Loader2 className="h-6 w-6 animate-spin" />
+              ) : tooEarly ? (
+                'Cannot start yet'
               ) : (
                 <>
                   <MapPin className="h-6 w-6 mr-2" />
@@ -417,6 +393,106 @@ export default function DeliveryDetailPage() {
         )}
       </div>
 
+      {/* Job details: pay, notes, stops, contacts, items, vehicle */}
+      <JobDetailsCard
+        payout={delivery.driver_payout}
+        packageDescription={delivery.package_description}
+        packageWeight={delivery.package_weight}
+        vehicleRequired={delivery.vehicle_required}
+        stops={[
+          {
+            label: 'Pickup',
+            address: delivery.pickup_address,
+            cityLine: `${delivery.pickup_city}, ${delivery.pickup_state} ${delivery.pickup_zip}`,
+            contactName: delivery.pickup_contact_name,
+            contactPhone: delivery.pickup_contact_phone,
+            instructions: delivery.pickup_instructions,
+            windowStart: delivery.pickup_window_start,
+            windowEnd: delivery.pickup_window_end,
+            lat: delivery.pickup_lat,
+            lng: delivery.pickup_lng,
+          },
+          {
+            label: 'Drop-off',
+            address: delivery.delivery_address,
+            cityLine: `${delivery.delivery_city}, ${delivery.delivery_state} ${delivery.delivery_zip}`,
+            contactName: delivery.delivery_contact_name,
+            contactPhone: delivery.delivery_contact_phone,
+            instructions: delivery.delivery_instructions,
+            windowStart: delivery.delivery_window_start,
+            windowEnd: delivery.delivery_window_end,
+            lat: delivery.delivery_lat,
+            lng: delivery.delivery_lng,
+          },
+        ]}
+      />
+
+      {/* Requirements */}
+      {(delivery.requires_signature || delivery.is_hipaa || delivery.requires_temperature_control) && (
+        <div className="bg-white mx-4 mt-4 rounded-xl shadow-sm p-4 space-y-2 text-sm">
+          {delivery.requires_signature && (
+            <div className="flex items-center text-blue-600">
+              <Pencil className="h-4 w-4 mr-2" />
+              Signature required
+            </div>
+          )}
+          {delivery.is_hipaa && (
+            <div className="flex items-center text-green-600">
+              <CheckCircle className="h-4 w-4 mr-2" />
+              HIPAA compliant - chain of custody required
+            </div>
+          )}
+          {delivery.requires_temperature_control && (
+            <div className="flex items-center text-cyan-600">
+              <Thermometer className="h-4 w-4 mr-2" />
+              Temperature: {delivery.temperature_min} C - {delivery.temperature_max} C
+              <button
+                onClick={() => setShowTempSheet(true)}
+                className="ml-2 text-xs bg-cyan-100 px-2 py-1 rounded"
+              >
+                Log Temp
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Help and exceptions */}
+      <div className="mx-4 mt-4 grid grid-cols-2 gap-3">
+        <a
+          href={EPYC_DISPATCH_PHONE_TEL}
+          className="py-3 bg-white rounded-xl shadow-sm text-center font-medium text-gray-800 flex items-center justify-center touch-target"
+        >
+          <Phone className="h-5 w-5 mr-2 text-green-600" />
+          Call EPYC dispatch
+        </a>
+        <a
+          href="/driver/help"
+          className="py-3 bg-white rounded-xl shadow-sm text-center font-medium text-gray-800 flex items-center justify-center touch-target"
+        >
+          <HelpCircle className="h-5 w-5 mr-2 text-epyc-primary" />
+          Help
+        </a>
+        {step !== 'done' && (
+          <button
+            onClick={() => setShowProblemSheet(true)}
+            className="py-3 bg-white rounded-xl shadow-sm font-medium text-orange-700 flex items-center justify-center touch-target"
+          >
+            <AlertTriangle className="h-5 w-5 mr-2" />
+            Report a problem
+          </button>
+        )}
+        {isReleasable(delivery.status) && (
+          <button
+            onClick={() => setShowReleaseSheet(true)}
+            className="py-3 bg-white rounded-xl shadow-sm font-medium text-red-700 flex items-center justify-center touch-target"
+          >
+            <X className="h-5 w-5 mr-2" />
+            Release job
+          </button>
+        )}
+      </div>
+
       {statusError && (
         <div className="fixed top-4 left-4 right-4 z-40 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg p-3 shadow">
           {statusError}
@@ -436,11 +512,33 @@ export default function DeliveryDetailPage() {
         />
       )}
 
-      {/* Navigation App Selector */}
+      {/* Navigation App Selector (choice is remembered) */}
       {showNavSheet && (
-        <NavigationSheet
-          onSelect={openNavigation}
-          onClose={() => setShowNavSheet(false)}
+        <NavigationSheet onSelect={chooseMapApp} onClose={() => setShowNavSheet(false)} />
+      )}
+
+      {showReleaseSheet && (
+        <ReleaseJobSheet
+          deliveryId={deliveryId}
+          onClose={() => setShowReleaseSheet(false)}
+          onReleased={() => {
+            setShowReleaseSheet(false);
+            router.push('/driver/jobs');
+          }}
+        />
+      )}
+
+      {showProblemSheet && (
+        <ReportProblemSheet
+          deliveryId={deliveryId}
+          stage={isPickupPhase ? 'pickup' : 'delivery'}
+          currentStatus={delivery.status}
+          getPosition={getCurrentPosition}
+          onClose={() => setShowProblemSheet(false)}
+          onReported={() => {
+            setShowProblemSheet(false);
+            setNotice('Problem reported. Dispatch has been alerted.');
+          }}
         />
       )}
     </div>
@@ -1015,13 +1113,13 @@ function TemperatureSheet({
         <div className="p-4">
           <div className="bg-cyan-50 rounded-lg p-3 mb-4">
             <p className="text-sm text-cyan-800">
-              Required range: {minTemp}°C - {maxTemp}°C
+              Required range: {minTemp} C - {maxTemp} C
             </p>
           </div>
 
           <div className="mb-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Current Temperature (°C)
+              Current Temperature ( C)
             </label>
             <input
               type="number"
@@ -1143,7 +1241,7 @@ function NavigationSheet({
 
         <div className="px-4 pb-4">
           <p className="text-xs text-center text-gray-500">
-            Tap to open directions in your preferred app
+            Your choice is remembered on this phone. Change it any time.
           </p>
         </div>
       </div>

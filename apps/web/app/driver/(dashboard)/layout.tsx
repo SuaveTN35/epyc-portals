@@ -2,13 +2,15 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
-import { Search, Navigation, DollarSign, User } from 'lucide-react';
+import { Search, Navigation, DollarSign, User, HelpCircle } from 'lucide-react';
+import { OfflineBanner } from '@/components/driver/OfflineBanner';
 
 const navigation = [
   { name: 'Find Jobs', href: '/driver/jobs', icon: Search },
   { name: 'Active', href: '/driver/active', icon: Navigation },
   { name: 'Earnings', href: '/driver/earnings', icon: DollarSign },
   { name: 'Profile', href: '/driver/profile', icon: User },
+  { name: 'Help', href: '/driver/help', icon: HelpCircle },
 ];
 
 export default async function DriverDashboardLayout({
@@ -36,6 +38,7 @@ export default async function DriverDashboardLayout({
 
   return (
     <div className="min-h-screen bg-gray-100 pb-20">
+      <OfflineBanner />
       {/* Top Header */}
       <header className="bg-epyc-primary text-white px-4 py-3 safe-area-top">
         <div className="flex items-center justify-between">
@@ -67,7 +70,7 @@ export default async function DriverDashboardLayout({
             <Link
               key={item.name}
               href={item.href}
-              className="flex flex-col items-center py-2 px-4 text-gray-600 hover:text-epyc-primary transition-colors touch-target"
+              className="flex flex-col items-center py-2 px-2 text-gray-600 hover:text-epyc-primary transition-colors touch-target"
             >
               <item.icon className="h-6 w-6" />
               <span className="text-xs mt-1">{item.name}</span>
