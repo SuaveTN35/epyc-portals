@@ -221,3 +221,13 @@ DROP TRIGGER IF EXISTS guard_delivery_driver_update ON public.deliveries;
 CREATE TRIGGER guard_delivery_driver_update
   BEFORE UPDATE ON public.deliveries
   FOR EACH ROW EXECUTE FUNCTION public.guard_delivery_driver_update();
+
+-- --------------------------------------------
+-- AEQUALIS QA B1 (P-352 Phase 2): drivers must not rewrite job_offers.
+-- The accept route trusts offer.status / expires_at / delivery_id; a driver
+-- editing their own offer row could resurrect an expired offer or repoint it
+-- at another booked job. Drivers now respond only via
+-- /api/driver/offers/[id]/respond (service role, ownership checked).
+-- Drivers keep SELECT on their own offers.
+-- --------------------------------------------
+DROP POLICY IF EXISTS "Drivers can update own job offers" ON public.job_offers;
