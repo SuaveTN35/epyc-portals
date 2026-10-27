@@ -17,6 +17,7 @@ import {
   Users,
   Loader2,
   Link2,
+  Plus,
 } from 'lucide-react';
 import { formatCurrency, formatDistance } from '@epyc/shared/utils';
 import {
@@ -272,13 +273,22 @@ export default function DashboardPage() {
             Real-time overview of your delivery operations
           </p>
         </div>
-        <Link
-          href="/dispatch/map"
-          className="inline-flex items-center px-4 py-2 bg-epyc-primary text-white rounded-lg hover:bg-blue-700 transition-colors"
-        >
-          <MapPin className="h-4 w-4 mr-2" />
-          Live Map
-        </Link>
+        <div className="flex gap-2">
+          <Link
+            href="/dispatch/deliveries/new"
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-gray-700 bg-white hover:bg-gray-50 transition-colors"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Job
+          </Link>
+          <Link
+            href="/dispatch/map"
+            className="inline-flex items-center px-4 py-2 bg-epyc-primary text-white rounded-lg hover:bg-blue-700 transition-colors"
+          >
+            <MapPin className="h-4 w-4 mr-2" />
+            Live Map
+          </Link>
+        </div>
       </div>
 
       {/* Stats grid */}

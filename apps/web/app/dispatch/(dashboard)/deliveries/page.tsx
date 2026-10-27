@@ -18,6 +18,7 @@ import {
   Loader2,
   RefreshCw,
   Link2,
+  Plus,
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
 import {
@@ -328,13 +329,22 @@ export default function DeliveriesPage() {
             Manage and track all delivery orders
           </p>
         </div>
-        <button
-          onClick={() => fetchDeliveries()}
-          className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => fetchDeliveries()}
+            className="inline-flex items-center px-4 py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+          >
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </button>
+          <Link
+            href="/dispatch/deliveries/new"
+            className="inline-flex items-center px-4 py-2 bg-epyc-primary text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            New Job
+          </Link>
+        </div>
       </div>
 
       {/* Pending alert */}

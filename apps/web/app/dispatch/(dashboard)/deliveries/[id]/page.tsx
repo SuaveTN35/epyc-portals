@@ -31,6 +31,7 @@ import {
   deliveryStatusBadge,
   deliveryStatusLabel,
 } from '@/lib/delivery-status';
+import { jobSourceLabel } from '@/lib/new-job';
 
 interface DeliveryDetail {
   id: string;
@@ -49,10 +50,12 @@ interface DeliveryDetail {
   delivery_contact_name: string;
   delivery_contact_phone: string;
   delivery_instructions: string | null;
-  package_description: string;
-  package_weight: number;
+  package_description: string | null;
+  package_weight: number | null;
   total_price: number | null;
-  distance_miles: number;
+  distance_miles: number | null;
+  source?: string | null;
+  source_reference?: string | null;
   driver_payout: number | null;
   requires_signature: boolean;
   is_fragile: boolean;
@@ -117,12 +120,22 @@ export default function DeliveryDetailPage() {
   const [temperatureLogs, setTemperatureLogs] = useState<TemperatureLog[]>([]);
   const [pod, setPod] = useState<ProofOfDelivery | null>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [justCreated, setJustCreated] = useState(false);
 
   useEffect(() => {
     if (params.id) {
       fetchDeliveryDetails();
     }
   }, [params.id]);
+
+  // Arriving from the New Job form (?created=1): confirm the save once.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (new URLSearchParams(window.location.search).get('created') === '1') {
+      setJustCreated(true);
+      window.history.replaceState(null, '', window.location.pathname);
+    }
+  }, []);
 
   const fetchDeliveryDetails = async () => {
     setLoading(true);
@@ -321,7 +334,11 @@ export default function DeliveryDetailPage() {
                 {deliveryStatusLabel(delivery.status)}
               </span>
               <span className="text-sm text-gray-500 capitalize">
-                {delivery.service_level.replace('_', ' ')} Service
+                {(delivery.service_level || 'standard').replace('_', ' ')} Service
+              </span>
+              <span className="text-sm text-gray-500">
+                {jobSourceLabel(delivery.source)}
+                {delivery.source_reference ? ` #${delivery.source_reference}` : ''}
               </span>
             </div>
           </div>
@@ -346,6 +363,13 @@ export default function DeliveryDetailPage() {
           )}
         </div>
       </div>
+
+      {justCreated && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4 flex items-center text-sm text-green-800">
+          <CheckCircle className="h-5 w-5 mr-3 text-green-600" />
+          Job saved as {delivery.tracking_number}. Assign a driver or offer it to drivers now.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main content */}
@@ -414,15 +438,21 @@ export default function DeliveryDetailPage() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               <div>
                 <p className="text-sm text-gray-500">Description</p>
-                <p className="font-medium">{delivery.package_description}</p>
+                <p className="font-medium">{delivery.package_description || '-'}</p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Weight</p>
-                <p className="font-medium">{delivery.package_weight} lbs</p>
+                <p className="font-medium">
+                  {delivery.package_weight != null ? `${delivery.package_weight} lbs` : '-'}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Distance</p>
-                <p className="font-medium">{delivery.distance_miles.toFixed(1)} miles</p>
+                <p className="font-medium">
+                  {delivery.distance_miles != null
+                    ? `${Number(delivery.distance_miles).toFixed(1)} miles`
+                    : '-'}
+                </p>
               </div>
               <div>
                 <p className="text-sm text-gray-500">Requirements</p>
