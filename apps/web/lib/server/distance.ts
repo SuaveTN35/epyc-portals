@@ -23,8 +23,8 @@ export class RouteNotFoundError extends Error {
   }
 }
 
-/** Straight-line miles x 1.3 to approximate driving distance. */
-export function haversineDrivingMiles(a: LatLng, b: LatLng): number {
+/** Great-circle (straight-line) miles between two points. */
+export function straightLineMiles(a: LatLng, b: LatLng): number {
   const R = 3959; // Earth radius in miles
   const toRad = (d: number) => (d * Math.PI) / 180;
   const dLat = toRad(b.lat - a.lat);
@@ -33,7 +33,12 @@ export function haversineDrivingMiles(a: LatLng, b: LatLng): number {
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-  return R * c * 1.3;
+  return R * c;
+}
+
+/** Straight-line miles x 1.3 to approximate driving distance. */
+export function haversineDrivingMiles(a: LatLng, b: LatLng): number {
+  return straightLineMiles(a, b) * 1.3;
 }
 
 export function formatDuration(minutes: number): string {
@@ -69,7 +74,10 @@ export interface DistanceOptions {
   /** Pass null to force haversine (tests). Omit to read the environment. */
   mapsKey?: string | null;
   fetchImpl?: typeof fetch;
+  timeoutMs?: number;
 }
+
+export const DISTANCE_TIMEOUT_MS = 4000;
 
 /**
  * Route distance between two points. Throws RouteNotFoundError when Google
@@ -95,6 +103,7 @@ export async function computeRouteDistance(
 
   let data: {
     status?: string;
+    error_message?: string;
     rows?: Array<{
       elements?: Array<{
         status?: string;
@@ -105,16 +114,26 @@ export async function computeRouteDistance(
     }>;
   };
   try {
-    const res = await (opts.fetchImpl ?? fetch)(url.toString());
+    const timeoutMs = opts.timeoutMs ?? DISTANCE_TIMEOUT_MS;
+    const signal =
+      typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(timeoutMs)
+        : undefined;
+    const res = await (opts.fetchImpl ?? fetch)(url.toString(), signal ? { signal } : undefined);
     data = await res.json();
   } catch (err) {
-    console.error('Distance Matrix request failed', err instanceof Error ? err.message : err);
+    // Error name only: some fetch errors echo the request URL, which carries the key.
+    console.error('Distance Matrix request failed', err instanceof Error ? err.name : 'unknown');
     return haversineResult(origin, destination, 'haversine_fallback');
   }
 
-  if (data.status !== 'OK') {
+  if (data?.status !== 'OK') {
     // Never log the request URL: it carries the key.
-    console.error('Distance Matrix status', data.status);
+    // error_message says why (API not enabled, billing, referrer-restricted key).
+    console.error('Distance Matrix status', {
+      status: data?.status ?? 'missing',
+      error_message: data?.error_message ?? null,
+    });
     return haversineResult(origin, destination, 'haversine_fallback');
   }
 

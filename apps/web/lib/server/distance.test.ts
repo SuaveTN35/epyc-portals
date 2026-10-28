@@ -53,6 +53,19 @@ describe('computeRouteDistance', () => {
     expect(r2.source).toBe('haversine_fallback');
   });
 
+  it('logs the matrix status and error_message, never the key', async () => {
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await computeRouteDistance(A, B, {
+      mapsKey: 'secret-key',
+      fetchImpl: jsonFetch({ status: 'REQUEST_DENIED', error_message: 'API keys with referer restrictions cannot be used with this API.' }),
+    });
+    const logged = JSON.stringify(err.mock.calls);
+    expect(logged).toMatch(/REQUEST_DENIED/);
+    expect(logged).toMatch(/referer restrictions/);
+    expect(logged).not.toMatch(/secret-key/);
+    err.mockRestore();
+  });
+
   it('throws RouteNotFoundError when Google has no route', async () => {
     const fetchImpl = jsonFetch({ status: 'OK', rows: [{ elements: [{ status: 'ZERO_RESULTS' }] }] });
     await expect(computeRouteDistance(A, B, { mapsKey: 'k', fetchImpl })).rejects.toBeInstanceOf(
