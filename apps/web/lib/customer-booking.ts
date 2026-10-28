@@ -1,7 +1,9 @@
 // Customer booking, server side (POST /api/client/deliveries, P-358).
 // The browser sends the form and the two picked coordinates; the server
-// validates them, recomputes distance (lib/server/distance.ts) and price
-// (calculateQuote), and inserts with the service role. Nothing in the
+// sanity-checks them here, then (P-362, lib/server/booking-route.ts)
+// geocodes the address text itself, prices the distance between the server
+// points (lib/server/distance.ts, calculateQuote), and inserts with the
+// service role. The browser coordinates are a hint, never the price basis. Nothing in the
 // request body is trusted for price, customer, status, or tracking number.
 //
 // buildCustomerBookingRow writes only live columns
