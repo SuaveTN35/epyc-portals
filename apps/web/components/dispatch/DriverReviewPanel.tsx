@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, ExternalLink, AlertCircle } from 'lucide-react';
+import { Loader2, AlertCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
   checklist,
@@ -16,6 +16,7 @@ import {
 } from '@/lib/driver-profile';
 import { GROUP_LABELS, type ProfileItemGroup } from '@/lib/driver-profile-items';
 import { StateIcon } from '@/components/driver/ProfileItemRow';
+import { DocumentThumb, DocumentViewer, type ViewerFile } from '@/components/dispatch/DocumentViewer';
 
 export interface ReviewPanelDriver extends DriverProfileFields {
   id: string;
@@ -47,15 +48,18 @@ function ExpiryTag({ date }: { date: string | null | undefined }) {
  * registration details, every checklist item (required first, then extras)
  * with photo, approve, and reject-with-reason, and what is still missing.
  * Decisions go through POST /api/dispatch/drivers/:id/review.
+ * Click any photo or document to open it large in the in-page viewer, step
+ * through all of the driver's files there, and approve or reject from it.
+ * licenseFiles (front / back) come from the page; they are view only.
  */
-export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
+export function DriverReviewPanel({ driver, licenseFiles = [] }: { driver: ReviewPanelDriver; licenseFiles?: ViewerFile[] }) {
   const [rows, setRows] = useState<ReviewRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [urls, setUrls] = useState<Record<string, string>>({});
   const [busyItem, setBusyItem] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [viewerIndex, setViewerIndex] = useState<number | null>(null);
 
   const load = useCallback(async () => {
     const supabase = createClient();
@@ -79,18 +83,25 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
     [driver, rows]
   );
 
-  const paths = useMemo(() => items.map((s) => s.path).filter((p): p is string => !!p), [items]);
-  useEffect(() => {
-    if (paths.length === 0) return;
-    fetch('/api/documents/signed-url', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ paths }),
-    })
-      .then((r) => (r.ok ? r.json() : { urls: {} }))
-      .then((d) => setUrls(d.urls || {}))
-      .catch(() => undefined);
-  }, [paths]);
+  // Every file, in the order the panel shows them: documents, license,
+  // vehicle, gear, badge. The viewer steps through this list.
+  const viewerFiles = useMemo<ViewerFile[]>(() => {
+    const fromItems = (group: ProfileItemGroup) =>
+      items
+        .filter((s) => s.def.group === group && !!s.path)
+        .map((s) => ({ key: s.def.id, path: s.path!, label: s.def.label, note: STATE_LABEL[s.state] }));
+    return [
+      ...fromItems('documents'),
+      ...licenseFiles,
+      ...fromItems('vehicle'),
+      ...fromItems('equipment'),
+      ...fromItems('badge'),
+    ];
+  }, [items, licenseFiles]);
+  const openFile = (key: string) => {
+    const i = viewerFiles.findIndex((f) => f.key === key);
+    if (i >= 0) setViewerIndex(i);
+  };
 
   const decide = async (s: ItemStatus, decision: 'approve' | 'reject', reason?: string) => {
     setBusyItem(s.def.id);
@@ -126,8 +137,6 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
   const reviewRow = rows.reduce<Record<string, ReviewRow>>((m, r) => ((m[r.item] = r), m), {});
 
   const renderItem = (s: ItemStatus) => {
-    const url = s.path ? urls[s.path] : null;
-    const isPdf = !!s.path && s.path.toLowerCase().endsWith('.pdf');
     const r = reviewRow[s.def.id];
     return (
       <li key={s.def.id} className="py-3">
@@ -187,17 +196,7 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
             )}
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            {url &&
-              (isPdf ? (
-                <a href={url} target="_blank" rel="noopener noreferrer" className="text-xs text-epyc-primary inline-flex items-center">
-                  PDF <ExternalLink className="h-3 w-3 ml-1" />
-                </a>
-              ) : (
-                <a href={url} target="_blank" rel="noopener noreferrer" title="Open full size">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={url} alt={s.def.label} className="w-12 h-12 rounded object-cover bg-gray-100" />
-                </a>
-              ))}
+            {s.path && <DocumentThumb path={s.path} label={s.def.label} onOpen={() => openFile(s.def.id)} />}
             {s.state !== 'missing' && (s.def.kind === 'data' || !!s.path) && rejecting !== s.def.id && (
               <>
                 {s.state !== 'approved' && (
@@ -296,6 +295,14 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
             <div key={g} className="mb-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mt-2">{GROUP_LABELS[g]}</h3>
               <ul className="divide-y divide-gray-100">{required.filter((s) => s.def.group === g).map(renderItem)}</ul>
+              {g === 'documents' && licenseFiles.length > 0 && (
+                <div className="py-3 flex items-center gap-3">
+                  <span className="text-sm font-medium text-gray-900 flex-1">Driver&apos;s license (view only)</span>
+                  {licenseFiles.map((f) => (
+                    <DocumentThumb key={f.key} path={f.path} label={f.label} onOpen={() => openFile(f.key)} />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           <div>
@@ -312,6 +319,93 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
             </div>
           )}
         </>
+      )}
+
+      {viewerIndex !== null && viewerFiles.length > 0 && (
+        <DocumentViewer
+          files={viewerFiles}
+          index={Math.min(viewerIndex, viewerFiles.length - 1)}
+          onIndexChange={setViewerIndex}
+          onClose={() => setViewerIndex(null)}
+          renderActions={(f) => {
+            const s = items.find((x) => x.def.id === f.key);
+            if (!s) return <p className="text-xs text-gray-300">View only</p>;
+            return (
+              <ViewerReviewActions
+                key={f.key}
+                status={s}
+                busy={busyItem === s.def.id}
+                onApprove={() => decide(s, 'approve')}
+                onReject={(reason) => decide(s, 'reject', reason)}
+              />
+            );
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Approve / reject for the file shown in the viewer. */
+function ViewerReviewActions({
+  status,
+  busy,
+  onApprove,
+  onReject,
+}: {
+  status: ItemStatus;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: (reason: string) => void;
+}) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState('');
+  if (rejecting) {
+    return (
+      <div className="flex gap-2 w-full max-w-xl">
+        <input
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          maxLength={500}
+          placeholder="Reason the driver will see"
+          className="flex-1 px-2 py-1.5 rounded text-sm"
+        />
+        <button
+          type="button"
+          disabled={busy || reason.trim().length < 3}
+          onClick={() => onReject(reason.trim())}
+          className="px-3 py-1.5 bg-red-600 text-white rounded text-sm disabled:opacity-50"
+        >
+          Reject
+        </button>
+        <button type="button" onClick={() => setRejecting(false)} className="px-2 py-1.5 text-sm text-gray-200">
+          Cancel
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-sm text-gray-200">{STATE_LABEL[status.state]}</span>
+      {status.state !== 'approved' && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={onApprove}
+          className="px-4 py-2 text-sm bg-green-600 text-white rounded disabled:opacity-50"
+        >
+          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Approve'}
+        </button>
+      )}
+      {status.state !== 'rejected' && (
+        <button
+          type="button"
+          onClick={() => setRejecting(true)}
+          className="px-4 py-2 text-sm border border-red-300 text-red-200 rounded hover:bg-red-900/30"
+        >
+          Reject
+        </button>
       )}
     </div>
   );

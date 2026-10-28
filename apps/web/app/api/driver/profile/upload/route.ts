@@ -4,6 +4,8 @@ import { createServiceClient } from '@/lib/server/driver-session';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { getProfileItem, isProfileItemId } from '@/lib/driver-profile-items';
 import { buildUploadPath, HEIC_MESSAGE } from '@/lib/driver-profile';
+import { DOCUMENT_CONTENT_TYPES, DOCUMENT_EXTENSIONS, sniffDocumentType, type DocumentKind } from '@/lib/document-sniff';
+import { heicToJpeg } from '@/lib/server/heic';
 
 /**
  * POST /api/driver/profile/upload   multipart: file, item, record ('1' or absent)
@@ -21,21 +23,17 @@ import { buildUploadPath, HEIC_MESSAGE } from '@/lib/driver-profile';
  *     also declares the gear; forced to pending by guard_driver_review_item);
  *   * id_badge_photo -> same, and only once dispatch has approved the driver
  *     (TRIBUNAL R1; the database enforces it too).
- * HEIC/HEIF is refused with a clear message: the browser converts photos to
- * JPEG before upload, so a HEIC arriving here is one the phone's browser
- * could not open, and dispatch's browser would not be able to show it (QA N4).
+ * The type is read from the file's first bytes, not the name or the type
+ * the browser claimed. The browser converts photos to JPEG before upload; a
+ * HEIC/HEIF that still arrives (the phone's browser could not open it) is
+ * converted to JPEG here so dispatch can see it. If that fails too, it is
+ * refused with a clear message (QA N4).
  * Without record (onboarding, before the drivers row exists) only the path is
  * returned and the onboarding submit records it.
  */
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const IMAGE_TYPES: Record<string, string> = {
-  'image/jpeg': 'jpg',
-  'image/jpg': 'jpg',
-  'image/png': 'png',
-  'image/webp': 'webp',
-};
-
+const PHOTO_KINDS: DocumentKind[] = ['jpeg', 'png', 'webp'];
 
 export async function POST(request: NextRequest) {
   const rate = checkRateLimit(`driver-profile-upload:${getClientIdentifier(request)}`, RATE_LIMITS.api);
@@ -67,17 +65,25 @@ export async function POST(request: NextRequest) {
   }
   if (file.size > MAX_BYTES) return NextResponse.json({ error: 'File must be under 10 MB' }, { status: 400 });
 
-  const type = (file.type || '').toLowerCase();
-  if (type === 'image/heic' || type === 'image/heif') {
-    return NextResponse.json({ error: HEIC_MESSAGE }, { status: 400 });
+  let bytes: Uint8Array = new Uint8Array(await file.arrayBuffer());
+  let kind = sniffDocumentType(bytes);
+  const claimedHeic = ['image/heic', 'image/heif'].includes((file.type || '').toLowerCase());
+  if (kind === 'heic' || (kind === null && claimedHeic)) {
+    try {
+      bytes = await heicToJpeg(bytes);
+      kind = 'jpeg';
+    } catch {
+      return NextResponse.json({ error: HEIC_MESSAGE }, { status: 400 });
+    }
   }
-  const ext = IMAGE_TYPES[type] ?? (def.allowPdf && type === 'application/pdf' ? 'pdf' : null);
-  if (!ext) {
+  if (!kind || !(PHOTO_KINDS.includes(kind) || (def.allowPdf && kind === 'pdf'))) {
     return NextResponse.json(
       { error: def.allowPdf ? 'Please send a photo or a PDF.' : 'Please send a photo (JPG, PNG, or iPhone photo).' },
       { status: 400 }
     );
   }
+  const ext = DOCUMENT_EXTENSIONS[kind];
+  const type = DOCUMENT_CONTENT_TYPES[kind];
 
   const session0 = record ? await session.from('drivers').select('id, status').eq('profile_id', user.id).maybeSingle() : null;
   if (item === 'id_badge_photo' && (!record || session0?.data?.status !== 'active')) {
@@ -88,7 +94,7 @@ export async function POST(request: NextRequest) {
   const admin = createServiceClient();
   const { error: uploadError } = await admin.storage
     .from('driver-documents')
-    .upload(path, Buffer.from(await file.arrayBuffer()), { contentType: type, upsert: false });
+    .upload(path, Buffer.from(bytes), { contentType: type, upsert: false });
   if (uploadError) {
     console.error('[driver-profile-upload] storage error', { item, message: uploadError.message });
     return NextResponse.json({ error: 'Upload failed. Please try again.' }, { status: 500 });

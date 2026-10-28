@@ -16,7 +16,6 @@ import {
   MapPin,
   Shield,
   Snowflake,
-  FileText,
   Calendar,
   Clock,
   Award,
@@ -29,6 +28,7 @@ import {
 import { formatCurrency } from '@epyc/shared/utils';
 import { toDriverDocumentPath } from '@/lib/delivery-status';
 import { DriverReviewPanel, type ReviewPanelDriver } from '@/components/dispatch/DriverReviewPanel';
+import type { ViewerFile } from '@/components/dispatch/DocumentViewer';
 
 interface DriverDetail {
   id: string;
@@ -243,26 +243,12 @@ export default function DriverDetailPage() {
     setUpdating(false);
   };
 
-  const openDocument = async (stored: string | null) => {
-    const path = toDriverDocumentPath(stored);
-    if (!path) return;
-    setActionError(null);
-    try {
-      const res = await fetch('/api/documents/signed-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path }),
-      });
-      const data = await res.json();
-      if (!res.ok || !data.url) {
-        setActionError('Could not open document.');
-        return;
-      }
-      window.open(data.url, '_blank', 'noopener,noreferrer');
-    } catch {
-      setActionError('Could not open document.');
-    }
-  };
+  // License photos open in the Documents & vehicle viewer with every other
+  // file (P-366), instead of a separate download per file.
+  const licenseFiles: ViewerFile[] = [
+    { key: 'license_front', label: 'License - front', path: toDriverDocumentPath(driver?.license_front_url) },
+    { key: 'license_back', label: 'License - back', path: toDriverDocumentPath(driver?.license_back_url) },
+  ].filter((f): f is ViewerFile => !!f.path);
 
   if (loading) {
     return (
@@ -409,7 +395,7 @@ export default function DriverDetailPage() {
         {/* Main content */}
         <div className="lg:col-span-2 space-y-6">
           {/* P-366: insurance, registration, vehicle photos, cargo size, equipment */}
-          <DriverReviewPanel driver={driver as unknown as ReviewPanelDriver} />
+          <DriverReviewPanel driver={driver as unknown as ReviewPanelDriver} licenseFiles={licenseFiles} />
 
           {/* Weekly performance */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -596,25 +582,10 @@ export default function DriverDetailPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-500 mb-2">Uploaded files</p>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { label: 'License front', value: driver.license_front_url },
-                    { label: 'License back', value: driver.license_back_url },
-                    // Insurance, registration, and vehicle photos are reviewed in
-                    // the Documents & vehicle panel (P-366).
-                  ].map((doc) => (
-                    <button
-                      key={doc.label}
-                      type="button"
-                      disabled={!doc.value}
-                      onClick={() => openDocument(doc.value)}
-                      className="text-xs px-2.5 py-1.5 border border-gray-300 rounded-lg text-gray-700 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed flex items-center"
-                    >
-                      <FileText className="h-3.5 w-3.5 mr-1.5" />
-                      {doc.label}
-                    </button>
-                  ))}
-                </div>
+                <p className="text-xs text-gray-600">
+                  License, insurance, registration, and vehicle photos open in the Documents &amp; vehicle panel. Click any
+                  photo to view it on the page.
+                </p>
               </div>
             </div>
           </div>

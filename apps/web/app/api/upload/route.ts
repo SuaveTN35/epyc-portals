@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { extensionForContentType } from '@/lib/upload-ext';
+import { isHeicBytes } from '@/lib/document-sniff';
+import { heicToJpeg } from '@/lib/server/heic';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -75,18 +77,29 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let buffer: Buffer = Buffer.from(await file.arrayBuffer());
+    let storedType = contentType;
+    // P-366: an iPhone HEIC the phone's browser could not convert is turned
+    // into a JPEG here so dispatch can see it. If conversion fails, the
+    // original is kept (the dispatch viewer tries again).
+    if (isHeicBytes(buffer)) {
+      try {
+        buffer = await heicToJpeg(buffer);
+        storedType = 'image/jpeg';
+      } catch (e) {
+        console.error('Upload HEIC conversion failed:', e instanceof Error ? e.message : e);
+      }
+    }
+
     // Extension comes from the validated content type, never the client's
     // file name (a name like "x.html" must not become a stored .html object).
-    const fileExt = extensionForContentType(contentType);
+    const fileExt = extensionForContentType(storedType);
     const fileName = `${path}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
-
-    const arrayBuffer = await file.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
 
     const { error: uploadError } = await supabaseAdmin.storage
       .from('driver-documents')
       .upload(fileName, buffer, {
-        contentType,
+        contentType: storedType,
         upsert: false,
       });
 

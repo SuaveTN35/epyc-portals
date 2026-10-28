@@ -12,7 +12,7 @@
  */
 
 /** Stay safely under Vercel's 4.5 MB request body limit (form overhead included). */
-import { HEIC_MESSAGE, isHeicFile } from './driver-profile';
+import { isHeicFile } from './driver-profile';
 
 export const MAX_UPLOAD_BYTES = 4 * 1024 * 1024;
 
@@ -176,9 +176,11 @@ export async function uploadProfileItemPhoto(
   }
   let prepared = pdf ? file : await shrinkImage(file);
   // QA N4: shrinkImage returns the original when the browser cannot decode
-  // it. A HEIC that was not converted would upload but could not be viewed.
+  // it (HEIC on many Android and desktop browsers). The upload route turns a
+  // HEIC into a JPEG on the server, so send it with a HEIC type; the route
+  // answers with HEIC_MESSAGE only if it cannot convert it either.
   if (!pdf && prepared === file && isHeicFile(file)) {
-    throw new UploadError(HEIC_MESSAGE);
+    prepared = new File([file], file.name, { type: file.type || 'image/heic' });
   }
   if (!pdf && !prepared.type) {
     prepared = new File([prepared], prepared.name, { type: 'image/jpeg' });

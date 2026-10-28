@@ -10,6 +10,9 @@ const nextConfig: NextConfig = {
     unoptimized: true,
   },
   transpilePackages: ['@epyc/shared'],
+  // P-366: HEIC to JPEG (lib/server/heic.ts). Loaded from node_modules at run
+  // time instead of bundled; libheif-js carries a large WASM build.
+  serverExternalPackages: ['heic-convert', 'heic-decode', 'libheif-js'],
   async headers() {
     return [
       {

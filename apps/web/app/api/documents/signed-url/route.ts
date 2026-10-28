@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { createClient as createServerClient } from '@/lib/supabase/server';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { isAllowedDocumentPath as isAllowedPath } from '@/lib/server/document-paths';
 
 /**
  * Issues a short-lived signed URL for a file in the private driver-documents
@@ -9,27 +10,7 @@ import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-lim
  * only staff can mint a link, and only for a path inside a known folder.
  */
 
-const ALLOWED_PREFIXES = [
-  'profile-photos/',
-  'license-front/',
-  'license-back/',
-  'licenses/',
-  'insurance/',
-  'registration/',
-  'vehicles/',
-  // P-366: driver-owned folder drivers/<profile_id>/...
-  'drivers/',
-];
-
 const MAX_BATCH = 30;
-
-function isAllowedPath(path: unknown): path is string {
-  return (
-    typeof path === 'string' &&
-    !path.includes('..') &&
-    ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix))
-  );
-}
 
 const EXPIRY_SECONDS = 300;
 

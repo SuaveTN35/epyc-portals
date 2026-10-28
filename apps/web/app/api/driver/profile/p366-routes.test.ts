@@ -5,6 +5,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { pacificToday } from '@/lib/driver-profile';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 type Op = [string, ...unknown[]];
 type Handler = (table: string, ops: Op[], terminal: string) => { data: unknown; error: unknown };
@@ -173,7 +175,22 @@ describe('POST /api/driver/profile/upload', () => {
 });
 
 describe('upload: HEIC and ID badge timing', () => {
-  it('refuses HEIC the browser could not convert, with a clear message (QA N4)', async () => {
+  it('converts a real HEIC to JPEG on the server and stores it as .jpg', async () => {
+    const real = readFileSync(join(__dirname, '../../../../lib/__fixtures__/sample.heic'));
+    const heic = new Blob([new Uint8Array(real)], { type: 'image/heic' });
+    const res = await upload(formReq({ item: 'vehicle_front', file: heic }));
+    expect(res.status).toBe(200);
+    const { path } = await res.json();
+    expect(path).toMatch(/^drivers\/prof-1\/vehicle_front-.*\.jpg$/);
+    expect(state.uploads).toContain(path);
+  });
+
+  it('types the upload by its bytes: HTML claimed as a JPEG is refused', async () => {
+    const fake = new Blob([new TextEncoder().encode('<html>x</html>')], { type: 'image/jpeg' });
+    expect((await upload(formReq({ item: 'vehicle_front', file: fake }))).status).toBe(400);
+  });
+
+  it('refuses a HEIC that cannot be converted either, with a clear message (QA N4)', async () => {
     const heic = new Blob([new Uint8Array([0, 0, 0, 24])], { type: 'image/heic' });
     const res = await upload(formReq({ item: 'vehicle_front', file: heic }));
     expect(res.status).toBe(400);
