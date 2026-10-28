@@ -325,3 +325,16 @@ describe('onboardingMissing', () => {
     expect(onboardingMissing({ ...all, gloves: false }).map((d) => d.id)).toEqual(['gloves']);
   });
 });
+
+describe('readinessFor (dispatch offer picker)', async () => {
+  const { readinessFor } = await import('./driver-readiness');
+  it('skips blocked drivers and exposes approved extras for matching', () => {
+    const rows = approvedRows(fullDriver);
+    const ok = readinessFor(fullDriver, rows, TODAY);
+    expect(ok.blockReason).toBeNull();
+    expect(ok.extras.map((e) => e.id).sort()).toEqual(['cooler_temp_kit', 'hand_truck', 'straps_blankets']);
+    const expired = readinessFor({ ...fullDriver, insurance_expiry: '2026-10-01' }, rows, TODAY);
+    expect(expired.blockReason).toBe('Insurance expired on 2026-10-01');
+    expect(expired.badges.map((b) => b.label)).toContain('Insurance expired');
+  });
+});

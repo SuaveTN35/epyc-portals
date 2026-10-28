@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { requestAssignedText } from '@/lib/sms-client';
+import { loadDriverReadiness } from '@/lib/driver-readiness';
 import {
   Package,
   Search,
@@ -59,6 +60,9 @@ interface Driver {
   vehicle_type: string;
   is_online: boolean;
   current_delivery_id: string | null;
+  /** P-366: insurance block reason, or null when the driver may take new work. */
+  block_reason?: string | null;
+  extras?: string[];
 }
 
 const statusOptions = [
@@ -207,8 +211,12 @@ export default function DeliveriesPage() {
       .order('is_online', { ascending: false });
 
     if (data) {
+      // P-366: drivers blocked for insurance cannot be assigned new jobs.
+      const readiness = await loadDriverReadiness(supabase, data.map((d: any) => d.id as string));
       setAvailableDrivers(
         data.map((d: any) => ({
+          block_reason: readiness[d.id] ? readiness[d.id].blockReason : 'Insurance status unknown',
+          extras: (readiness[d.id]?.extras || []).map((x) => x.shortLabel || x.label),
           id: d.id,
           full_name: d.profiles?.full_name || 'Unknown',
           vehicle_type: d.vehicle_type,
@@ -604,7 +612,7 @@ export default function DeliveriesPage() {
                   <button
                     key={driver.id}
                     onClick={() => handleAssignDriver(driver.id)}
-                    disabled={assigning}
+                    disabled={assigning || !!driver.block_reason}
                     className="w-full flex items-center justify-between p-3 border border-gray-200 rounded-lg hover:border-epyc-primary hover:bg-blue-50 transition-colors disabled:opacity-50"
                   >
                     <div className="flex items-center gap-3">
@@ -619,7 +627,11 @@ export default function DeliveriesPage() {
                         </p>
                         <p className="text-xs text-gray-500 capitalize">
                           {driver.vehicle_type.replace('_', ' ')}
+                          {driver.extras && driver.extras.length > 0 ? ` - ${driver.extras.join(', ')}` : ''}
                         </p>
+                        {driver.block_reason && (
+                          <p className="text-xs text-red-700">Cannot assign: {driver.block_reason}</p>
+                        )}
                       </div>
                     </div>
                     {driver.current_delivery_id ? (

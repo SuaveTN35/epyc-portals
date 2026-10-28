@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
 import { toDriverDocumentPath } from '@/lib/delivery-status';
+import { DriverReviewPanel, type ReviewPanelDriver } from '@/components/dispatch/DriverReviewPanel';
 
 interface DriverDetail {
   id: string;
@@ -407,6 +408,9 @@ export default function DriverDetailPage() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Main content */}
         <div className="lg:col-span-2 space-y-6">
+          {/* P-366: insurance, registration, vehicle photos, cargo size, equipment */}
+          <DriverReviewPanel driver={driver as unknown as ReviewPanelDriver} />
+
           {/* Weekly performance */}
           <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">This Week</h2>
@@ -596,11 +600,8 @@ export default function DriverDetailPage() {
                   {[
                     { label: 'License front', value: driver.license_front_url },
                     { label: 'License back', value: driver.license_back_url },
-                    { label: 'Insurance card', value: driver.insurance_card_url },
-                    { label: 'Registration', value: driver.registration_url },
-                    { label: 'Vehicle front', value: driver.vehicle_photo_front_url },
-                    { label: 'Vehicle back', value: driver.vehicle_photo_back_url },
-                    { label: 'Vehicle side', value: driver.vehicle_photo_side_url },
+                    // Insurance, registration, and vehicle photos are reviewed in
+                    // the Documents & vehicle panel (P-366).
                   ].map((doc) => (
                     <button
                       key={doc.label}

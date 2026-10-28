@@ -9,6 +9,7 @@ import {
   offerExpiresAt,
 } from '@/lib/job-offers';
 import { requestOfferTexts } from '@/lib/sms-client';
+import { loadDriverReadiness } from '@/lib/driver-readiness';
 
 interface OfferDriver {
   id: string;
@@ -19,6 +20,10 @@ interface OfferDriver {
   current_lat: number | null;
   current_lng: number | null;
   has_open_offer: boolean;
+  /** P-366: why this driver cannot get new offers (insurance), or null. */
+  block_reason: string | null;
+  /** Approved optional equipment (dolly, blankets, cooler) for matching. */
+  extras: string[];
 }
 
 interface OfferJobDialogProps {
@@ -68,6 +73,10 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
         setError(driverError.message);
       }
       const offered = new Set((openOffers || []).map((o: any) => o.driver_id as string));
+      const readiness = await loadDriverReadiness(
+        supabase,
+        (driverRows || []).map((d: any) => d.id as string)
+      );
       setDrivers(
         (driverRows || []).map((d: any) => ({
           id: d.id,
@@ -78,6 +87,10 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
           current_lat: d.current_lat,
           current_lng: d.current_lng,
           has_open_offer: offered.has(d.id),
+          // Unknown readiness (lookup failed) is treated as blocked; the
+          // database refuses the offer anyway.
+          block_reason: readiness[d.id] ? readiness[d.id].blockReason : 'Insurance status unknown',
+          extras: (readiness[d.id]?.extras || []).map((x) => x.shortLabel || x.label),
         }))
       );
       setLoading(false);
@@ -105,7 +118,7 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
     const supabase = createClient();
     const expiresAt = offerExpiresAt(expiry);
     const rows = drivers
-      .filter((d) => selected.has(d.id))
+      .filter((d) => selected.has(d.id) && !d.block_reason)
       .map((d) => ({
         delivery_id: delivery.id,
         driver_id: d.id,
@@ -183,13 +196,13 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
                 <li key={d.id}>
                   <label
                     className={`flex items-center gap-3 p-3 ${
-                      d.has_open_offer ? 'opacity-50' : 'cursor-pointer hover:bg-gray-50'
+                      d.has_open_offer || d.block_reason ? 'opacity-60' : 'cursor-pointer hover:bg-gray-50'
                     }`}
                   >
                     <input
                       type="checkbox"
                       className="h-4 w-4 rounded border-gray-300 text-epyc-primary"
-                      disabled={d.has_open_offer}
+                      disabled={d.has_open_offer || !!d.block_reason}
                       checked={selected.has(d.id)}
                       onChange={() => toggle(d.id)}
                     />
@@ -200,6 +213,18 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
                         {d.busy ? ' - on a job' : ''}
                         {d.has_open_offer ? ' - already offered' : ''}
                       </p>
+                      {d.block_reason && (
+                        <p className="text-xs text-red-700">Cannot offer: {d.block_reason}</p>
+                      )}
+                      {d.extras.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {d.extras.map((x) => (
+                            <span key={x} className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
+                              {x}
+                            </span>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <span
                       className={`text-xs px-2 py-0.5 rounded-full ${

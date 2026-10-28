@@ -22,6 +22,8 @@ import {
   RefreshCw,
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
+import { loadDriverReadiness, type DriverReadiness } from '@/lib/driver-readiness';
+import { DriverExtrasIcons, DriverReadinessBadges } from '@/components/dispatch/DriverReadinessBadges';
 
 interface Driver {
   id: string;
@@ -85,6 +87,8 @@ export default function DriversPage() {
   const [statusFilter, setStatusFilter] = useState('all');
   const [vehicleFilter, setVehicleFilter] = useState('all');
   const [onlineOnly, setOnlineOnly] = useState(false);
+  // P-366: insurance / registration / missing-required badges and extras.
+  const [readiness, setReadiness] = useState<Record<string, DriverReadiness>>({});
 
   useEffect(() => {
     fetchDrivers();
@@ -152,6 +156,9 @@ export default function DriversPage() {
     if (driversData) {
       // Get today's earnings and deliveries for each driver
       const driverIds = driversData.map((d: any) => d.id);
+      loadDriverReadiness(supabase, driverIds)
+        .then(setReadiness)
+        .catch(() => setReadiness({}));
 
       const { data: todayDeliveries } = await supabase
         .from('deliveries')
@@ -420,6 +427,14 @@ export default function DriversPage() {
                   </span>
                 )}
               </div>
+
+              {/* P-366: insurance, registration, and missing REQUIRED items; extras */}
+              {readiness[driver.id] && (
+                <div className="space-y-2 mb-4">
+                  <DriverReadinessBadges badges={readiness[driver.id].badges} />
+                  <DriverExtrasIcons extras={readiness[driver.id].extras} />
+                </div>
+              )}
 
               {/* Today's stats */}
               <div className="flex items-center justify-between py-3 border-t border-gray-100">
