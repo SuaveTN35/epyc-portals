@@ -7,6 +7,7 @@ import {
   validateDropoffProof,
   buildDropoffProofRows,
   proofPhotoPath,
+  isProofPathForDelivery,
   LEFT_WITHOUT_SIGNATURE_PREFIX,
   NO_RECEIPT_PREFIX,
   pickupChecklist,
@@ -167,5 +168,38 @@ describe('checklists', () => {
       false,
     ]);
     expect(done(dropoffChecklist('delivered'))).toEqual([true, true, true, true]);
+  });
+});
+
+describe('isProofPathForDelivery (mirrors guard_proof_photo_path, P-358)', () => {
+  const id = '3f1c2a9e-8b7d-4c6e-9a1b-2c3d4e5f6a7b';
+  const other = '00000000-0000-0000-0000-000000000000';
+
+  it('accepts every path the app generates', () => {
+    for (const stage of ['pickup', 'delivery'] as const) {
+      for (const kind of ['item', 'receipt', 'placement', 'recipient', 'other'] as const) {
+        expect(isProofPathForDelivery(id, proofPhotoPath(id, stage, kind))).toBe(true);
+      }
+    }
+    // ReportProblemSheet exception photos
+    expect(isProofPathForDelivery(id, `${id}/exception-1761600000000.jpg`)).toBe(true);
+  });
+
+  it('rejects other folders, traversal, nesting, URLs, and empty values', () => {
+    expect(isProofPathForDelivery(id, `${other}/x.jpg`)).toBe(false);
+    expect(isProofPathForDelivery(id, `${id}/../${other}/x.jpg`)).toBe(false);
+    expect(isProofPathForDelivery(id, `${id}/a..b.jpg`)).toBe(false);
+    expect(isProofPathForDelivery(id, `${id}/sub/x.jpg`)).toBe(false);
+    expect(isProofPathForDelivery(id, `${id}/`)).toBe(false);
+    expect(isProofPathForDelivery(id, `${id}/.hidden`)).toBe(false);
+    expect(isProofPathForDelivery(id, `https://evil.example/${id}/x.jpg`)).toBe(false);
+    expect(isProofPathForDelivery(id, `x${id}/x.jpg`)).toBe(false);
+    expect(isProofPathForDelivery(id, id)).toBe(false);
+    expect(isProofPathForDelivery(id, null)).toBe(false);
+    expect(isProofPathForDelivery('', 'a/b.jpg')).toBe(false);
+  });
+
+  it('matches the delivery id case-insensitively on the id side only', () => {
+    expect(isProofPathForDelivery(id.toUpperCase(), `${id}/x.jpg`)).toBe(true);
   });
 });

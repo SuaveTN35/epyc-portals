@@ -3,6 +3,7 @@ import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-lim
 import { createClient as createSessionClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/server/driver-session';
 import { isSafeSignatureData, selectCustomerProof, type ProofRow } from '@/lib/customer-delivery';
+import { isProofPathForDelivery } from '@/lib/proof-flow';
 
 const SIGNED_URL_SECONDS = 300;
 
@@ -64,8 +65,9 @@ export async function GET(
 
   const photos: string[] = [];
   for (const path of proof.placementPaths) {
-    // Paths only; a full URL here would not be ours to vouch for.
-    if (/^https?:\/\//i.test(path)) continue;
+    // Only paths inside this delivery's own folder are signed (P-358). A full
+    // URL, another delivery's folder, or a traversal path is skipped.
+    if (!isProofPathForDelivery(delivery.id, path)) continue;
     const { data: signed } = await admin.storage
       .from('delivery-photos')
       .createSignedUrl(path, SIGNED_URL_SECONDS);

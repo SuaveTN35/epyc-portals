@@ -89,6 +89,23 @@ export function proofPhotoPath(
   return `${deliveryId}/${stage}-${kind}-${ts}-${Math.random().toString(36).slice(2, 6)}.jpg`;
 }
 
+/**
+ * A stored proof photo path must sit directly under the delivery's own
+ * folder: "<delivery_id>/<file>". One segment after the id, safe characters
+ * only, no "..", no URL. The database enforces the same rule for non-staff
+ * inserts in trigger guard_proof_photo_path (migration
+ * 20261028000400_p358_price_integrity.sql). Keep the two in step.
+ */
+export const PROOF_FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
+
+export function isProofPathForDelivery(deliveryId: string, path: string | null | undefined): boolean {
+  if (typeof path !== 'string' || typeof deliveryId !== 'string' || !deliveryId) return false;
+  const prefix = `${deliveryId.toLowerCase()}/`;
+  if (!path.startsWith(prefix)) return false;
+  const file = path.slice(prefix.length);
+  return PROOF_FILE_NAME_RE.test(file) && !file.includes('..');
+}
+
 export interface Gps {
   lat: number;
   lng: number;
