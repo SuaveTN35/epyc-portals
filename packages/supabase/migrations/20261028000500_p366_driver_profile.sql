@@ -7,16 +7,26 @@
 --      inches / capacity in pounds (new columns; the older vehicle_length/
 --      width/height and cargo_capacity columns were captured in feet and
 --      cubic feet and are left untouched).
---   2. driver_review_items: one row per driver per reviewable item (8
---      equipment photos, 4 vehicle photos, insurance card, registration,
---      cargo dimensions) with status pending / approved / rejected, the
---      reviewer, the time, and the rejection reason.
+--   2. driver_review_items: one row per driver per reviewable item (4
+--      vehicle photos, insurance card, registration, cargo dimensions, the
+--      8 gear items the driver says they own, and the post-approval ID badge
+--      photo) with status pending / approved / rejected, the reviewer, the
+--      time, and the rejection reason.
+--      Gear (TRIBUNAL P-367 R12, Commander ruling 2026-10-28): DECLARED, not
+--      required. A gear row means "I own this" (owned = true/false); its
+--      photo is optional. Gear never gates onboarding or work. Each job can
+--      list the gear it needs (deliveries.required_equipment, section 2b) and
+--      the driver sees that before accepting and may decline.
+--      ID badge photo (R1): collected only after dispatch approves the driver
+--      (drivers.status = 'active'); never at application, never face-matched.
 --   3. Guards (enforced by trigger, like Phase 0, not only by RLS):
 --        * a driver can only create or change their own review rows, and
 --          every driver write lands as 'pending' with reviewer fields cleared;
 --          only staff can approve or reject, and a rejection needs a reason;
 --        * a driver's new document/photo paths must sit in their own
---          storage folder drivers/<profile_id>/<file>;
+--          storage folder drivers/<profile_id>/<file> (or be exactly the
+--          file already on their own record); shared legacy folders are
+--          never accepted for a new value (QA N1);
 --        * a driver cannot change vehicle type, make, model, year, plate, or
 --          VIN after signup (dispatch changes those);
 --        * when a driver changes insurance, registration, a vehicle photo, or
@@ -45,8 +55,11 @@
 --
 -- DEPLOY ORDER: apply this migration BEFORE the P-366 web code (the new
 -- onboarding inserts the new columns). The old web code keeps working
--- against this schema, except that dispatch can no longer offer or assign
--- a job to a driver whose insurance is blocked (the intended change).
+-- against this schema, except that (a) dispatch can no longer offer or
+-- assign a job to a driver whose insurance is blocked (intended), and (b)
+-- the OLD onboarding page, which stores insurance/registration/vehicle
+-- photos in shared folders, is refused until the new code is live (QA N1);
+-- deploy the code within minutes of the migration.
 
 -- --------------------------------------------
 -- 1. drivers: new columns
@@ -101,6 +114,7 @@ CREATE TABLE IF NOT EXISTS public.driver_review_items (
   driver_id uuid NOT NULL REFERENCES public.drivers(id) ON DELETE CASCADE,
   item text NOT NULL,
   photo_path text,
+  owned boolean NOT NULL DEFAULT true,
   status text NOT NULL DEFAULT 'pending',
   reason text,
   uploaded_at timestamptz NOT NULL DEFAULT now(),
@@ -119,7 +133,7 @@ BEGIN
         'hi_vis_vest', 'straps_blankets', 'cooler_temp_kit', 'hand_truck',
         'safety_glasses', 'boots', 'gloves', 'mask',
         'vehicle_front', 'vehicle_back', 'vehicle_side', 'vehicle_cargo',
-        'insurance_card', 'registration', 'cargo_dimensions'
+        'insurance_card', 'registration', 'cargo_dimensions', 'id_badge_photo'
       ));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'driver_review_items_status_check' AND conrelid = 'public.driver_review_items'::regclass) THEN
@@ -128,11 +142,33 @@ BEGIN
   END IF;
 END $$;
 
+-- Re-run safety if an earlier draft of this file created the table first.
+ALTER TABLE public.driver_review_items ADD COLUMN IF NOT EXISTS owned boolean NOT NULL DEFAULT true;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'driver_review_items_item_check' AND conrelid = 'public.driver_review_items'::regclass
+      AND pg_get_constraintdef(oid) NOT LIKE '%id_badge_photo%'
+  ) THEN
+    ALTER TABLE public.driver_review_items DROP CONSTRAINT driver_review_items_item_check;
+    ALTER TABLE public.driver_review_items ADD CONSTRAINT driver_review_items_item_check
+      CHECK (item IN (
+        'hi_vis_vest', 'straps_blankets', 'cooler_temp_kit', 'hand_truck',
+        'safety_glasses', 'boots', 'gloves', 'mask',
+        'vehicle_front', 'vehicle_back', 'vehicle_side', 'vehicle_cargo',
+        'insurance_card', 'registration', 'cargo_dimensions', 'id_badge_photo'
+      ));
+  END IF;
+END $$;
+
 CREATE INDEX IF NOT EXISTS idx_driver_review_items_status ON public.driver_review_items(status);
 
 ALTER TABLE public.driver_review_items ENABLE ROW LEVEL SECURITY;
 
-REVOKE ALL ON public.driver_review_items FROM anon;
+-- QA N3: start from nothing (Supabase default privileges grant ALL), then
+-- grant only what the policies use. No DELETE for signed-in users.
+REVOKE ALL ON public.driver_review_items FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.driver_review_items TO authenticated;
 GRANT ALL ON public.driver_review_items TO service_role;
 
@@ -169,6 +205,27 @@ CREATE POLICY "driver_review_items_staff_update" ON public.driver_review_items
   FOR UPDATE TO authenticated
   USING (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'dispatcher')))
   WITH CHECK (EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'dispatcher')));
+
+-- --------------------------------------------
+-- 2b. deliveries.required_equipment (gear a specific job needs)
+-- --------------------------------------------
+-- Set by dispatch on the job (New Job form or the offer dialog). Shown to
+-- the driver on the offer BEFORE accept; the driver may decline without
+-- penalty. Informational for matching; never a hard block. Drivers cannot
+-- change it (guard_delivery_driver_update allow-list from Phase 2).
+ALTER TABLE public.deliveries
+  ADD COLUMN IF NOT EXISTS required_equipment text[] NOT NULL DEFAULT '{}';
+
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'deliveries_required_equipment_check' AND conrelid = 'public.deliveries'::regclass) THEN
+    ALTER TABLE public.deliveries ADD CONSTRAINT deliveries_required_equipment_check
+      CHECK (required_equipment <@ ARRAY[
+        'hi_vis_vest', 'straps_blankets', 'cooler_temp_kit', 'hand_truck',
+        'safety_glasses', 'boots', 'gloves', 'mask'
+      ]::text[]);
+  END IF;
+END $$;
 
 -- --------------------------------------------
 -- 3. Helpers
@@ -254,7 +311,18 @@ begin
     return new;
   end if;
 
+  -- R1: the ID badge photo is collected only after dispatch approves the driver.
+  if new.item = 'id_badge_photo' and v_driver.status is distinct from 'active' then
+    raise exception 'The ID badge photo is added after your application is approved'
+      using errcode = '42501';
+  end if;
+
   if new.photo_path is null then
+    -- Gear is declared; its photo is optional (R12).
+    if new.item in ('hi_vis_vest', 'straps_blankets', 'cooler_temp_kit', 'hand_truck',
+                    'safety_glasses', 'boots', 'gloves', 'mask') then
+      return new;
+    end if;
     raise exception 'A photo is required' using errcode = '42501';
   end if;
 
@@ -282,10 +350,9 @@ CREATE TRIGGER guard_driver_review_item
 -- Non-staff only:
 --   * vehicle identity is fixed after signup;
 --   * a new or changed document/photo path must be in the driver's own
---     folder. On INSERT the three legacy folders written by /api/upload
---     (insurance/, registration/, vehicles/) are also accepted so an
---     applicant on a cached older page is not stuck; the file still lands
---     as 'pending' for dispatch to review.
+--     folder. Shared legacy folders (insurance/, registration/, vehicles/)
+--     are never accepted for a new value, on INSERT or UPDATE (QA N1): a
+--     legacy path can only stay because it was already on the row.
 CREATE OR REPLACE FUNCTION public.guard_driver_profile_fields()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -319,11 +386,7 @@ begin
     v_new := to_jsonb(new) ->> v_col;
     v_old := case when tg_op = 'UPDATE' then to_jsonb(old) ->> v_col else null end;
     if v_new is not null and v_new is distinct from v_old then
-      if not public.is_driver_own_upload_path(v_new, new.profile_id)
-         and not (
-           tg_op = 'INSERT'
-           and v_new ~ '^(insurance|registration|vehicles)/[A-Za-z0-9][A-Za-z0-9._-]{0,199}$'
-         ) then
+      if not public.is_driver_own_upload_path(v_new, new.profile_id) then
         raise exception 'Document path for % must be in your own folder', v_col
           using errcode = '42501';
       end if;

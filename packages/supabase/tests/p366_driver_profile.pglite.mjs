@@ -6,7 +6,11 @@
 // Builds a minimal Supabase-like scaffold (roles, auth.uid(), live drivers
 // policies, caller_is_staff()), applies the migration twice, and checks:
 // driver cannot approve own items, staff can; path rules; vehicle identity
-// lock; re-review queueing; the insurance block on offers / accept / assign.
+// lock; re-review queueing; the insurance block on offers / accept / assign;
+// gear declared with optional photo (R12); ID badge photo only after
+// approval (R1); deliveries.required_equipment; privileges (QA N3); and the
+// interaction with the live Phase 0 / Phase 1 drivers guard (AEQUALIS QA
+// reproduction, folded in 2026-10-28).
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -49,7 +53,11 @@ await db.exec(`
     insurance_policy text, insurance_expiry date, insurance_card_url text,
     registration_url text,
     vehicle_photo_front_url text, vehicle_photo_back_url text, vehicle_photo_side_url text,
-    is_online boolean default false
+    is_online boolean default false,
+    background_check_status text default 'pending', background_check_date date,
+    hipaa_certified boolean default false, hipaa_cert_expiry date, rating numeric(3,2) default 5.00,
+    total_deliveries int default 0, loyalty_tier text default 'bronze', current_delivery_id uuid,
+    updated_at timestamptz default now()
   );
   create table public.deliveries (
     id uuid primary key, customer_id uuid, driver_id uuid references public.drivers(id), status text
@@ -85,6 +93,42 @@ await db.exec(`
     return exists (select 1 from public.profiles where id = auth.uid() and role in ('admin','dispatcher'));
   end; $f$;
   grant execute on function public.caller_is_staff() to anon, authenticated, service_role;
+
+
+  create or replace function public.guard_driver_protected_fields() returns trigger language plpgsql
+  set search_path to 'public' as $f$
+  begin
+    if public.caller_is_staff() then return new; end if;
+    if tg_op = 'INSERT' then
+      new.background_check_status := 'pending'; new.background_check_date := null;
+      new.hipaa_certified := false; new.hipaa_cert_expiry := null; new.rating := 5.00;
+      new.total_deliveries := 0; new.loyalty_tier := 'bronze'; new.status := 'pending';
+      new.current_delivery_id := null;
+      return new;
+    end if;
+    if new.background_check_status is distinct from old.background_check_status
+       or new.background_check_date is distinct from old.background_check_date
+       or new.hipaa_certified is distinct from old.hipaa_certified
+       or new.hipaa_cert_expiry is distinct from old.hipaa_cert_expiry
+       or new.rating is distinct from old.rating
+       or new.total_deliveries is distinct from old.total_deliveries
+       or new.loyalty_tier is distinct from old.loyalty_tier
+       or new.profile_id is distinct from old.profile_id
+       or new.status is distinct from old.status then
+      raise exception 'Approval fields are set by dispatch only' using errcode = '42501';
+    end if;
+    if new.current_delivery_id is distinct from old.current_delivery_id and new.current_delivery_id is not null
+       and not exists (select 1 from public.deliveries where id = new.current_delivery_id and driver_id = new.id) then
+      raise exception 'not your delivery' using errcode = '42501';
+    end if;
+    return new;
+  end; $f$;
+  create trigger guard_driver_protected_fields before insert or update on public.drivers
+    for each row execute function public.guard_driver_protected_fields();
+  create or replace function public.update_updated_at_column() returns trigger language plpgsql as $f$
+  begin new.updated_at := now(); return new; end; $f$;
+  create trigger update_drivers_updated_at before update on public.drivers
+    for each row execute function public.update_updated_at_column();
 
   insert into profiles values ('${ADMIN}','admin'), ('${P1}','driver'), ('${P2}','driver'), ('${CUST}','customer');
   -- D1: legacy driver, insurance card in the old folder, current expiry, no review row.
@@ -152,8 +196,8 @@ for (const bad of [`drivers/${P1}/../x.jpg`, `drivers/${P1}/sub/x.jpg`, `insuran
   r = await as('authenticated', P1, `insert into driver_review_items (driver_id, item, photo_path) values ('${D1}', 'boots', '${bad}') returning id`);
   ok(`driver bad photo path refused: ${bad}`, r.error && r.error.code === '42501', r.error?.message || 'inserted');
 }
-r = await as('authenticated', P1, `insert into driver_review_items (driver_id, item, photo_path) values ('${D1}', 'boots', null) returning id`);
-ok('driver photo item without photo refused', !!r.error);
+r = await as('authenticated', P1, `insert into driver_review_items (driver_id, item, photo_path) values ('${D1}', 'vehicle_front', null) returning id`);
+ok('driver vehicle photo item without photo refused', !!r.error);
 
 r = await as('authenticated', P1, `select count(*)::int n from driver_review_items where driver_id = '${D2}'`);
 ok('driver cannot read another driver rows', r.rows && r.rows[0].n === 0);
@@ -276,7 +320,7 @@ ok('applicant insert queues pending rows for each provided group',
 r = await as('authenticated', P3, `insert into drivers (profile_id, insurance_card_url) values ('${P3}', 'drivers/${P1}/x.jpg') returning id`);
 ok('applicant insert pointing at another folder refused', r.error && r.error.code === '42501', r.error?.message);
 r = await as('authenticated', P3, `insert into drivers (profile_id, insurance_card_url) values ('${P3}', 'insurance/123-abc.jpg') returning id`);
-ok('applicant insert with legacy folder path accepted (transitional)', r.rows && r.rows.length === 1, r.error?.message);
+ok('N1: applicant insert with a shared legacy folder path refused', r.error && r.error.code === '42501', r.error?.message || 'inserted');
 
 await commitAs('service_role', null, `update driver_review_items set status = 'approved' where driver_id = '${D3}' and item = 'cargo_dimensions'`);
 await commitAs('authenticated', P3, `update drivers set cargo_capacity_lbs = 2500 where id = '${D3}'`);
@@ -292,6 +336,96 @@ ok('staff edit does not reset review', row.status === 'approved', JSON.stringify
 // Function privileges.
 r = await as('authenticated', P1, `select public.driver_offer_block_reason('${D2}')`);
 ok('drivers cannot call driver_offer_block_reason directly', !!r.error);
+
+
+// ================= AEQUALIS QA PROBES (Phase 0 interaction) =================
+const trg = (await db.query(`select tgname from pg_trigger where tgrelid = 'public.drivers'::regclass and not tgisinternal order by tgname`)).rows.map(x=>x.tgname);
+console.log('QA drivers triggers (alpha order):', JSON.stringify(trg));
+r = await as('authenticated', P1, `update drivers set status = 'suspended', insurance_expiry = current_date + 400 where id = '${D1}' returning id`);
+ok('QA phase0 still blocks driver status change alongside P-366 columns', r.error && r.error.code === '42501', r.error?.message || 'updated');
+r = await as('authenticated', P1, `update drivers set rating = 1 where id = '${D1}' returning id`);
+ok('QA phase0 still blocks rating change', r.error && r.error.code === '42501', r.error?.message);
+const P4 = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+await db.exec(`insert into profiles values ('${P4}', 'driver')`);
+r = await commitAs('authenticated', P4, `insert into drivers (profile_id, status, rating, insurance_card_url, insurance_expiry)
+   values ('${P4}', 'active', 5, 'drivers/${P4}/insurance_card-1.jpg', current_date + 100) returning id, status, updated_at`);
+ok('QA applicant insert: phase0 forces status pending, P-366 queue still fires', r.rows && r.rows[0].status === 'pending', r.error?.message || JSON.stringify(r.rows));
+const D4 = r.rows?.[0]?.id;
+const q4 = (await db.query(`select item, status from driver_review_items where driver_id = '${D4}'`)).rows;
+ok('QA applicant insert queued insurance_card pending once', q4.length === 1 && q4[0].status === 'pending', JSON.stringify(q4));
+// legacy cross-driver file on INSERT
+const P5 = 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+await db.exec(`insert into profiles values ('${P5}', 'driver')`);
+r = await commitAs('authenticated', P5, `insert into drivers (profile_id, insurance_card_url) values ('${P5}', 'insurance/legacy-2.jpg') returning id`);
+ok('N1 (QA finding fixed): applicant cannot INSERT another driver legacy file path', r.error && r.error.code === '42501', r.error?.message || 'inserted');
+const q5 = (await db.query(`select count(*)::int n from driver_review_items where photo_path = 'insurance/legacy-2.jpg'`)).rows;
+ok('N1: no review row points at the foreign legacy file', q5[0].n === 0, JSON.stringify(q5));
+// blocked driver can still set current_delivery_id to assigned in-progress job
+await db.exec(`update deliveries set driver_id = '${D1}', status='in_transit' where id = '${DEL2}'`);
+await db.exec(`update drivers set insurance_expiry = (now() at time zone 'America/Los_Angeles')::date - 5 where id = '${D1}'`);
+ok('QA D1 is blocked (expired)', /^Insurance expired/.test(await reason(D1) || ''), await reason(D1));
+r = await as('authenticated', P1, `update drivers set current_delivery_id = '${DEL2}' where id = '${D1}' returning id`);
+ok('QA blocked driver can still set current_delivery_id on own in-progress job', r.rows && r.rows.length === 1, r.error?.message);
+r = await as('service_role', null, `update deliveries set driver_id = '${D1}', status = 'delivered' where id = '${DEL2}' returning id`);
+ok('QA status update that re-sends same driver_id still allowed', r.rows && r.rows.length === 1, r.error?.message);
+r = await as('authenticated', P1, `update drivers set current_delivery_id = '${DEL}' where id = '${D1}' returning id`);
+ok('QA phase0 current_delivery_id guard still fires', r.error && r.error.code === '42501', r.error?.message || 'updated');
+// driver cannot touch another driver row
+r = await as('authenticated', P1, `update drivers set insurance_expiry = current_date + 999 where id = '${D2}' returning id`);
+ok('QA driver cannot update another driver row (0 rows)', r.rows && r.rows.length === 0, r.error?.message);
+// driver cannot unblock self via direct REST: insert/upsert own insurance row approved
+r = await as('authenticated', P1, `insert into driver_review_items (driver_id,item,photo_path,status) values ('${D1}','insurance_card','drivers/${P1}/insurance_card-1.jpg','approved')
+   on conflict (driver_id,item) do update set status='approved' returning status`);
+ok('QA driver upsert of own insurance as approved lands pending', r.rows && r.rows[0].status === 'pending', r.error?.message || JSON.stringify(r.rows));
+// race: driver changes expiry after staff loaded, staff upsert approves same path -> unseen expiry approved
+await db.exec(`update drivers set insurance_expiry = (now() at time zone 'America/Los_Angeles')::date + 30 where id = '${D1}'`);
+await commitAs('service_role', null, `update driver_review_items set status='approved', photo_path=(select insurance_card_url from drivers where id='${D1}') where driver_id='${D1}' and item='insurance_card'`);
+ok('QA baseline approved', (await reason(D1)) === null, await reason(D1));
+await commitAs('authenticated', P1, `update drivers set insurance_expiry = insurance_expiry + 3000 where id = '${D1}'`);
+ok('QA driver expiry edit re-blocks', (await reason(D1)) === 'Insurance card is waiting for dispatch review', await reason(D1));
+
+
+// ================= Revision round 2026-10-28 =================
+// Gear: declared, photo optional (R12).
+r = await as('authenticated', P1, `insert into driver_review_items (driver_id, item, photo_path, owned) values ('${D1}', 'boots', null, true) returning status, owned`);
+ok('R12: driver declares gear without a photo', r.rows && r.rows[0].status === 'pending' && r.rows[0].owned === true, r.error?.message);
+r = await as('authenticated', P1, `insert into driver_review_items (driver_id, item, photo_path) values ('${D1}', 'vehicle_cargo', null) returning id`);
+ok('vehicle/document items still need a photo', r.error && r.error.code === '42501', r.error?.message || 'inserted');
+await commitAs('authenticated', P1, `insert into driver_review_items (driver_id, item, photo_path) values ('${D1}', 'mask', 'drivers/${P1}/mask-1.jpg') on conflict (driver_id, item) do nothing`);
+r = await as('authenticated', P1, `update driver_review_items set owned = false where driver_id = '${D1}' and item = 'mask' returning owned, status`);
+ok('R12: driver can un-declare gear (owned=false)', r.rows && r.rows[0].owned === false && r.rows[0].status === 'pending', r.error?.message);
+
+// ID badge photo: only after approval (R1).
+r = await as('authenticated', P3, `insert into driver_review_items (driver_id, item, photo_path) values ('${D3}', 'id_badge_photo', 'drivers/${P3}/id_badge_photo-1.jpg') returning id`);
+ok('R1: pending applicant cannot add the ID badge photo', r.error && r.error.code === '42501', r.error?.message || 'inserted');
+r = await as('authenticated', P1, `insert into driver_review_items (driver_id, item, photo_path) values ('${D1}', 'id_badge_photo', 'drivers/${P1}/id_badge_photo-1.jpg') returning status`);
+ok('R1: approved (active) driver can add the ID badge photo, lands pending', r.rows && r.rows[0].status === 'pending', r.error?.message);
+
+// deliveries.required_equipment
+r = await as('service_role', null, `update deliveries set required_equipment = array['hi_vis_vest','boots'] where id = '${DEL}' returning required_equipment`);
+ok('required_equipment accepts gear ids', r.rows && r.rows.length === 1, r.error?.message);
+r = await as('service_role', null, `update deliveries set required_equipment = array['hi_vis_vest','jetpack'] where id = '${DEL}' returning id`);
+ok('required_equipment refuses unknown ids', r.error && r.error.code === '23514', r.error?.message || 'updated');
+const reDefault = (await db.query(`select required_equipment from deliveries where id = '${DEL2}'`)).rows[0].required_equipment;
+ok('required_equipment defaults to empty for existing jobs', Array.isArray(reDefault) && reDefault.length === 0, JSON.stringify(reDefault));
+
+// QA N3: privileges.
+const privs = (await db.query(`select privilege_type from information_schema.role_table_grants
+  where table_name = 'driver_review_items' and grantee = 'authenticated' order by 1`)).rows.map((x) => x.privilege_type);
+ok('N3: authenticated has exactly SELECT, INSERT, UPDATE', JSON.stringify(privs) === JSON.stringify(['INSERT', 'SELECT', 'UPDATE']), JSON.stringify(privs));
+const anonPrivs = (await db.query(`select count(*)::int n from information_schema.role_table_grants
+  where table_name = 'driver_review_items' and grantee in ('anon', 'PUBLIC')`)).rows[0].n;
+ok('N3: anon and PUBLIC have no privileges', anonPrivs === 0, String(anonPrivs));
+
+// Review version (N2 support): every driver write bumps uploaded_at.
+const before = (await db.query(`select uploaded_at from driver_review_items where driver_id = '${D1}' and item = 'insurance_card'`)).rows[0].uploaded_at;
+await new Promise((res) => setTimeout(res, 15));
+await commitAs('authenticated', P1, `update drivers set insurance_policy = 'POL-NEW' where id = '${D1}'`);
+const after = (await db.query(`select uploaded_at from driver_review_items where driver_id = '${D1}' and item = 'insurance_card'`)).rows[0].uploaded_at;
+ok('N2: a driver insurance edit bumps the review version (uploaded_at)', new Date(after).getTime() > new Date(before).getTime(), `${before} -> ${after}`);
+await commitAs('service_role', null, `update driver_review_items set status = 'approved' where driver_id = '${D1}' and item = 'insurance_card'`);
+const staffAfter = (await db.query(`select uploaded_at from driver_review_items where driver_id = '${D1}' and item = 'insurance_card'`)).rows[0].uploaded_at;
+ok('N2: a staff review does not change the version', new Date(staffAfter).getTime() === new Date(after).getTime(), `${after} -> ${staffAfter}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
