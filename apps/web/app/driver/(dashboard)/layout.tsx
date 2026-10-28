@@ -4,6 +4,8 @@ import { createClient } from '@/lib/supabase/server';
 import { redirect } from 'next/navigation';
 import { Search, Navigation, DollarSign, User, HelpCircle } from 'lucide-react';
 import { OfflineBanner } from '@/components/driver/OfflineBanner';
+import { ProfileBanners } from '@/components/driver/ProfileBanners';
+import { driverWarnings, pacificToday, profileGaps } from '@/lib/driver-profile';
 
 const navigation = [
   { name: 'Find Jobs', href: '/driver/jobs', icon: Search },
@@ -36,6 +38,15 @@ export default async function DriverDashboardLayout({
     redirect('/driver/onboarding');
   }
 
+  // P-366: insurance / registration warnings and missing REQUIRED items.
+  const { data: reviewRows } = await supabase
+    .from('driver_review_items')
+    .select('item, photo_path, status, reason')
+    .eq('driver_id', driver.id);
+  const today = pacificToday();
+  const warnings = driverWarnings(driver, reviewRows || [], today);
+  const gaps = profileGaps(driver, reviewRows || []);
+
   return (
     <div className="min-h-screen bg-gray-100 pb-20">
       <OfflineBanner />
@@ -61,7 +72,10 @@ export default async function DriverDashboardLayout({
       </header>
 
       {/* Main Content */}
-      <main className="p-4">{children}</main>
+      <main className="p-4">
+        <ProfileBanners warnings={warnings} gaps={gaps} />
+        {children}
+      </main>
 
       {/* Bottom Navigation */}
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 safe-area-bottom">

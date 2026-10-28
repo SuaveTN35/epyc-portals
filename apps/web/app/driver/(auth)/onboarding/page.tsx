@@ -18,6 +18,19 @@ import Image from 'next/image';
 import { VEHICLE_CONFIG } from '@epyc/shared';
 import type { VehicleType } from '@epyc/shared';
 import DocumentUpload from '@/components/DocumentUpload';
+import { ProfileItemRow } from '@/components/driver/ProfileItemRow';
+import { uploadProfileItemPhoto } from '@/lib/upload-client';
+import { PROFILE_ITEMS, type ProfileItemDef, type ProfileItemId } from '@/lib/driver-profile-items';
+import {
+  DIMENSION_BOUNDS,
+  onboardingMissing,
+  pacificToday,
+  validateDimensions,
+  validateInsuranceDetails,
+  validateRegistrationExpiry,
+} from '@/lib/driver-profile';
+
+const PHOTO_ITEMS = (PROFILE_ITEMS as readonly ProfileItemDef[]).filter((d) => d.kind === 'photo');
 
 type Step = 'vehicle' | 'license' | 'documents' | 'photos' | 'review';
 
@@ -26,6 +39,9 @@ export default function DriverOnboardingPage() {
   const [step, setStep] = useState<Step>('vehicle');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // P-366 checklist photos: storage path and a local preview per item.
+  const [itemPaths, setItemPaths] = useState<Partial<Record<ProfileItemId, string>>>({});
+  const [itemPreviews, setItemPreviews] = useState<Partial<Record<ProfileItemId, string>>>({});
 
   const [formData, setFormData] = useState({
     // Vehicle
@@ -35,10 +51,11 @@ export default function DriverOnboardingPage() {
     vehicle_year: new Date().getFullYear(),
     vehicle_plate: '',
     vehicle_vin: '',
-    vehicle_length: '',
-    vehicle_width: '',
-    vehicle_height: '',
-    cargo_capacity: '',
+    // Cargo space in inches and max load in pounds (P-366).
+    cargo_length_in: '',
+    cargo_width_in: '',
+    cargo_height_in: '',
+    cargo_capacity_lbs: '',
     has_temperature_control: false,
     // License
     license_number: '',
@@ -47,14 +64,15 @@ export default function DriverOnboardingPage() {
     // Insurance
     insurance_policy: '',
     insurance_expiry: '',
-    // Document URLs
+    insurance_carrier: '',
+    insurance_bi_per_person: '',
+    insurance_bi_per_accident: '',
+    insurance_pd_limit: '',
+    insurance_business_use: null as boolean | null,
+    registration_expiry: '',
+    // License photos (insurance, registration, and vehicle photos are in itemPaths)
     license_front_url: '',
     license_back_url: '',
-    insurance_card_url: '',
-    registration_url: '',
-    vehicle_photo_front_url: '',
-    vehicle_photo_back_url: '',
-    vehicle_photo_side_url: '',
     // SMS consent (unticked by default; never pre-checked)
     sms_opt_in: false,
   });
@@ -67,6 +85,44 @@ export default function DriverOnboardingPage() {
       ...prev,
       [name]: type === 'checkbox' ? (e.target as HTMLInputElement).checked : value,
     }));
+  };
+
+  const today = pacificToday();
+
+  const goNext = (next: Step) => {
+    setError(null);
+    if (step === 'vehicle') {
+      const v = validateDimensions(formData);
+      if (!v.ok) return setError(v.error);
+    }
+    if (step === 'documents') {
+      const ins = validateInsuranceDetails(formData, today);
+      if (!ins.ok) return setError(ins.error);
+      const reg = validateRegistrationExpiry(formData, today);
+      if (!reg.ok) return setError(reg.error);
+    }
+    if (step === 'photos') {
+      const missing = onboardingMissing(
+        Object.fromEntries(PHOTO_ITEMS.map((d) => [d.id, !!itemPaths[d.id as ProfileItemId]]).concat([['cargo_dimensions', true]]))
+      );
+      if (missing.length > 0) {
+        return setError(`Still needed: ${missing.map((d) => d.label).join(', ')}`);
+      }
+    }
+    setStep(next);
+  };
+
+  const uploadItem = (def: ProfileItemDef) => async (file: File) => {
+    const { path, file: sent } = await uploadProfileItemPhoto(file, def.id, {
+      allowPdf: !!def.allowPdf,
+      record: false,
+    });
+    setItemPaths((prev) => ({ ...prev, [def.id]: path }));
+    setItemPreviews((prev) => {
+      const old = prev[def.id as ProfileItemId];
+      if (old) URL.revokeObjectURL(old);
+      return { ...prev, [def.id]: URL.createObjectURL(sent) };
+    });
   };
 
   const handleSubmit = async () => {
@@ -86,8 +142,24 @@ export default function DriverOnboardingPage() {
     const vehicleConfig = VEHICLE_CONFIG[formData.vehicle_type];
     const maxWeightCapacity = vehicleConfig?.maxWeight || 50;
 
-    // Create driver record
-    const { error: insertError } = await supabase.from('drivers').insert({
+    // Re-check everything required before writing (P-366).
+    const dims = validateDimensions(formData);
+    const ins = validateInsuranceDetails(formData, today);
+    const reg = validateRegistrationExpiry(formData, today);
+    const missingItems = onboardingMissing(
+      Object.fromEntries(PHOTO_ITEMS.map((d) => [d.id, !!itemPaths[d.id as ProfileItemId]]).concat([['cargo_dimensions', true]]))
+    );
+    if (!dims.ok || !ins.ok || !reg.ok || missingItems.length > 0) {
+      setError(
+        !dims.ok ? dims.error : !ins.ok ? ins.error : !reg.ok ? reg.error : `Still needed: ${missingItems.map((d) => d.label).join(', ')}`
+      );
+      setLoading(false);
+      return;
+    }
+
+    // Create driver record. The database queues every document, vehicle
+    // photo, and the dimensions for dispatch review as 'pending'.
+    const { data: created, error: insertError } = await supabase.from('drivers').insert({
       profile_id: user.id,
       vehicle_type: formData.vehicle_type,
       vehicle_make: formData.vehicle_make,
@@ -95,32 +167,44 @@ export default function DriverOnboardingPage() {
       vehicle_year: formData.vehicle_year,
       vehicle_plate: formData.vehicle_plate,
       vehicle_vin: formData.vehicle_vin || null,
-      vehicle_length: formData.vehicle_length ? parseFloat(formData.vehicle_length) : null,
-      vehicle_width: formData.vehicle_width ? parseFloat(formData.vehicle_width) : null,
-      vehicle_height: formData.vehicle_height ? parseFloat(formData.vehicle_height) : null,
-      cargo_capacity: formData.cargo_capacity ? parseInt(formData.cargo_capacity) : null,
+      ...dims.value,
       has_temperature_control: formData.has_temperature_control,
       license_number: formData.license_number,
       license_state: formData.license_state,
       license_expiry: formData.license_expiry,
-      insurance_policy: formData.insurance_policy,
-      insurance_expiry: formData.insurance_expiry || null,
+      ...ins.value,
+      ...reg.value,
       max_weight_capacity: maxWeightCapacity,
       background_check_status: 'pending',
       // Document URLs
       license_front_url: formData.license_front_url || null,
       license_back_url: formData.license_back_url || null,
-      insurance_card_url: formData.insurance_card_url || null,
-      registration_url: formData.registration_url || null,
-      vehicle_photo_front_url: formData.vehicle_photo_front_url || null,
-      vehicle_photo_back_url: formData.vehicle_photo_back_url || null,
-      vehicle_photo_side_url: formData.vehicle_photo_side_url || null,
-    });
+      insurance_card_url: itemPaths.insurance_card ?? null,
+      registration_url: itemPaths.registration ?? null,
+      vehicle_photo_front_url: itemPaths.vehicle_front ?? null,
+      vehicle_photo_back_url: itemPaths.vehicle_back ?? null,
+      vehicle_photo_side_url: itemPaths.vehicle_side ?? null,
+      vehicle_photo_cargo_url: itemPaths.vehicle_cargo ?? null,
+    }).select('id').single();
 
-    if (insertError) {
-      setError(insertError.message);
+    if (insertError || !created) {
+      setError(insertError?.message || 'Could not save your application. Please try again.');
       setLoading(false);
       return;
+    }
+
+    // Equipment photos (required and extras) go to dispatch as 'pending'.
+    const equipmentRows = PHOTO_ITEMS.filter((d) => d.group === 'equipment' && itemPaths[d.id as ProfileItemId]).map((d) => ({
+      driver_id: created.id,
+      item: d.id,
+      photo_path: itemPaths[d.id as ProfileItemId]!,
+    }));
+    if (equipmentRows.length > 0) {
+      const { error: equipmentError } = await supabase.from('driver_review_items').insert(equipmentRows);
+      if (equipmentError) {
+        // The application itself is saved; the profile page lets them re-add these.
+        console.error('Equipment save failed:', equipmentError.code);
+      }
     }
 
     // Update profile role to driver
@@ -304,60 +388,47 @@ export default function DriverOnboardingPage() {
                 <p className="text-xs text-gray-500 mt-1">17-character Vehicle Identification Number</p>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Length (ft)</label>
-                  <input
-                    type="number"
-                    name="vehicle_length"
-                    value={formData.vehicle_length}
-                    onChange={handleChange}
-                    step="0.1"
-                    min="0"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                    placeholder="15"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Width (ft)</label>
-                  <input
-                    type="number"
-                    name="vehicle_width"
-                    value={formData.vehicle_width}
-                    onChange={handleChange}
-                    step="0.1"
-                    min="0"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                    placeholder="6"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Height (ft)</label>
-                  <input
-                    type="number"
-                    name="vehicle_height"
-                    value={formData.vehicle_height}
-                    onChange={handleChange}
-                    step="0.1"
-                    min="0"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                    placeholder="7"
-                  />
+              <div>
+                <p className="block text-sm font-medium text-gray-700">Cargo space (inches)</p>
+                <p className="text-xs text-gray-500 mb-2">Measure the space where the load goes: trunk, bed, or cargo box.</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {(['cargo_length_in', 'cargo_width_in', 'cargo_height_in'] as const).map((k) => (
+                    <div key={k}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">
+                        {DIMENSION_BOUNDS[k].label.replace('Cargo ', '')} (in)
+                      </label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        name={k}
+                        value={formData[k]}
+                        onChange={handleChange}
+                        step="0.5"
+                        min={DIMENSION_BOUNDS[k].min}
+                        max={DIMENSION_BOUNDS[k].max}
+                        required
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      />
+                    </div>
+                  ))}
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Cargo Capacity (cu ft)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Max load (lbs)</label>
                 <input
                   type="number"
-                  name="cargo_capacity"
-                  value={formData.cargo_capacity}
+                  inputMode="numeric"
+                  name="cargo_capacity_lbs"
+                  value={formData.cargo_capacity_lbs}
                   onChange={handleChange}
-                  min="0"
+                  min={DIMENSION_BOUNDS.cargo_capacity_lbs.min}
+                  max={DIMENSION_BOUNDS.cargo_capacity_lbs.max}
+                  required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg"
-                  placeholder="200"
+                  placeholder="1000"
                 />
-                <p className="text-xs text-gray-500 mt-1">Approximate cargo space in cubic feet</p>
+                <p className="text-xs text-gray-500 mt-1">The most weight your vehicle can safely carry, in pounds</p>
               </div>
 
               <label className="flex items-center">
@@ -374,7 +445,7 @@ export default function DriverOnboardingPage() {
               </label>
 
               <button
-                onClick={() => setStep('license')}
+                onClick={() => goNext('license')}
                 className="w-full py-3 bg-epyc-primary text-white rounded-lg font-medium flex items-center justify-center"
               >
                 Continue
@@ -442,7 +513,7 @@ export default function DriverOnboardingPage() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep('documents')}
+                  onClick={() => goNext('documents')}
                   className="flex-1 py-3 bg-epyc-primary text-white rounded-lg font-medium flex items-center justify-center"
                 >
                   Continue
@@ -485,10 +556,86 @@ export default function DriverOnboardingPage() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Insurance Company</label>
+                <input
+                  type="text"
+                  name="insurance_carrier"
+                  value={formData.insurance_carrier}
+                  onChange={handleChange}
+                  maxLength={100}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  placeholder="Company name on your card"
+                />
+              </div>
+
+              <div>
+                <p className="block text-sm font-medium text-gray-700">Coverage Limits (dollars)</p>
+                <p className="text-xs text-gray-500 mb-2">From your card or declarations page, for example 30,000 / 60,000 / 15,000.</p>
+                <div className="grid grid-cols-3 gap-3">
+                  {([
+                    ['insurance_bi_per_person', 'Injury per person'],
+                    ['insurance_bi_per_accident', 'Injury per accident'],
+                    ['insurance_pd_limit', 'Property damage'],
+                  ] as const).map(([k, label]) => (
+                    <div key={k}>
+                      <label className="block text-xs font-medium text-gray-700 mb-1">{label} ($)</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        name={k}
+                        value={formData[k]}
+                        onChange={handleChange}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <fieldset>
+                <legend className="block text-sm font-medium text-gray-700 mb-2">
+                  Does your policy cover delivery / business use?
+                </legend>
+                <div className="flex gap-3">
+                  {[
+                    { v: true, t: 'Yes' },
+                    { v: false, t: 'No' },
+                  ].map((o) => (
+                    <button
+                      key={o.t}
+                      type="button"
+                      onClick={() => setFormData((prev) => ({ ...prev, insurance_business_use: o.v }))}
+                      className={`flex-1 py-3 rounded-lg border text-sm font-medium ${
+                        formData.insurance_business_use === o.v
+                          ? 'border-epyc-primary bg-emerald-50 text-gray-900'
+                          : 'border-gray-300 text-gray-700'
+                      }`}
+                    >
+                      {o.t}
+                    </button>
+                  ))}
+                </div>
+              </fieldset>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Vehicle Registration Expiration Date
+                </label>
+                <input
+                  type="date"
+                  name="registration_expiry"
+                  value={formData.registration_expiry}
+                  onChange={handleChange}
+                  min={today}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                />
+              </div>
+
               <div className="bg-blue-50 rounded-lg p-4">
                 <p className="text-sm text-blue-800">
-                  <strong>Note:</strong> You can upload photos of your documents later from your
-                  profile. We&apos;ll verify them during the background check.
+                  You will photograph your insurance card and registration on the next step.
+                  You cannot get job offers until dispatch approves a current insurance card.
                 </p>
               </div>
 
@@ -501,7 +648,7 @@ export default function DriverOnboardingPage() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep('photos')}
+                  onClick={() => goNext('photos')}
                   className="flex-1 py-3 bg-epyc-primary text-white rounded-lg font-medium flex items-center justify-center"
                 >
                   Continue
@@ -543,72 +690,47 @@ export default function DriverOnboardingPage() {
                 </div>
               </div>
 
-              <div className="space-y-4">
-                <h3 className="font-medium text-gray-800">Insurance & Registration</h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <DocumentUpload
-                    label="Insurance Card"
-                    description="Your auto insurance card"
-                    bucket="driver-documents"
-                    path={`insurance`}
-                    currentUrl={formData.insurance_card_url || null}
-                    onUploadComplete={(url) => setFormData(prev => ({ ...prev, insurance_card_url: url }))}
-                    icon="file"
-                    accept="image/*,.pdf"
-                  />
-                  <DocumentUpload
-                    label="Registration"
-                    description="Vehicle registration document"
-                    bucket="driver-documents"
-                    path={`registration`}
-                    currentUrl={formData.registration_url || null}
-                    onUploadComplete={(url) => setFormData(prev => ({ ...prev, registration_url: url }))}
-                    icon="file"
-                    accept="image/*,.pdf"
-                  />
+              {([
+                ['Vehicle', 'vehicle', true],
+                ['Insurance & Registration', 'documents', true],
+                ['Equipment', 'equipment', true],
+              ] as const).map(([title, group]) => (
+                <div key={group} className="space-y-1">
+                  <h3 className="font-medium text-gray-800">{title}</h3>
+                  <ul className="divide-y divide-gray-100">
+                    {PHOTO_ITEMS.filter((d) => d.group === group && d.required).map((d) => (
+                      <ProfileItemRow
+                        key={d.id}
+                        def={d}
+                        state={itemPaths[d.id as ProfileItemId] ? 'pending' : 'missing'}
+                        thumbUrl={itemPreviews[d.id as ProfileItemId] ?? null}
+                        isPdf={!!itemPaths[d.id as ProfileItemId]?.endsWith('.pdf')}
+                        onFile={uploadItem(d)}
+                      />
+                    ))}
+                  </ul>
                 </div>
-              </div>
+              ))}
 
-              <div className="space-y-4">
-                <h3 className="font-medium text-gray-800">Vehicle Photos</h3>
-                <p className="text-xs text-gray-500">
-                  Clear photos of your vehicle from different angles
-                </p>
-                <div className="grid grid-cols-3 gap-3">
-                  <DocumentUpload
-                    label="Front"
-                    description="Front view"
-                    bucket="driver-documents"
-                    path={`vehicles`}
-                    currentUrl={formData.vehicle_photo_front_url || null}
-                    onUploadComplete={(url) => setFormData(prev => ({ ...prev, vehicle_photo_front_url: url }))}
-                    icon="image"
-                  />
-                  <DocumentUpload
-                    label="Back"
-                    description="Rear view"
-                    bucket="driver-documents"
-                    path={`vehicles`}
-                    currentUrl={formData.vehicle_photo_back_url || null}
-                    onUploadComplete={(url) => setFormData(prev => ({ ...prev, vehicle_photo_back_url: url }))}
-                    icon="image"
-                  />
-                  <DocumentUpload
-                    label="Side"
-                    description="Side view"
-                    bucket="driver-documents"
-                    path={`vehicles`}
-                    currentUrl={formData.vehicle_photo_side_url || null}
-                    onUploadComplete={(url) => setFormData(prev => ({ ...prev, vehicle_photo_side_url: url }))}
-                    icon="image"
-                  />
-                </div>
+              <div className="space-y-1">
+                <h3 className="font-medium text-gray-800">Extras that get you more jobs</h3>
+                <p className="text-xs text-gray-500">Optional. Add these if you have them; dispatch uses them to match jobs.</p>
+                <ul className="divide-y divide-gray-100">
+                  {PHOTO_ITEMS.filter((d) => !d.required).map((d) => (
+                    <ProfileItemRow
+                      key={d.id}
+                      def={d}
+                      state={itemPaths[d.id as ProfileItemId] ? 'pending' : 'missing'}
+                      thumbUrl={itemPreviews[d.id as ProfileItemId] ?? null}
+                      onFile={uploadItem(d)}
+                    />
+                  ))}
+                </ul>
               </div>
 
               <div className="bg-amber-50 rounded-lg p-4">
                 <p className="text-sm text-amber-800">
-                  <strong>Tip:</strong> You can skip uploading photos now and add them later from your profile,
-                  but uploading them now speeds up approval.
+                  Items marked Required are needed to finish your application. Dispatch reviews each photo.
                 </p>
               </div>
 
@@ -621,7 +743,7 @@ export default function DriverOnboardingPage() {
                   Back
                 </button>
                 <button
-                  onClick={() => setStep('review')}
+                  onClick={() => goNext('review')}
                   className="flex-1 py-3 bg-epyc-primary text-white rounded-lg font-medium flex items-center justify-center"
                 >
                   Review
@@ -647,14 +769,10 @@ export default function DriverOnboardingPage() {
                   {formData.vehicle_vin && (
                     <p className="text-sm text-gray-600">VIN: {formData.vehicle_vin}</p>
                   )}
-                  {(formData.vehicle_length || formData.vehicle_width || formData.vehicle_height) && (
-                    <p className="text-sm text-gray-600">
-                      Dimensions: {formData.vehicle_length || '-'} x {formData.vehicle_width || '-'} x {formData.vehicle_height || '-'} ft
-                    </p>
-                  )}
-                  {formData.cargo_capacity && (
-                    <p className="text-sm text-gray-600">Cargo Capacity: {formData.cargo_capacity} cu ft</p>
-                  )}
+                  <p className="text-sm text-gray-600">
+                    Cargo space: {formData.cargo_length_in || '-'} x {formData.cargo_width_in || '-'} x {formData.cargo_height_in || '-'} in (L x W x H)
+                  </p>
+                  <p className="text-sm text-gray-600">Max load: {formData.cargo_capacity_lbs || '-'} lbs</p>
                 </div>
 
                 <div className="bg-gray-50 rounded-lg p-4">
@@ -667,77 +785,44 @@ export default function DriverOnboardingPage() {
                   </p>
                 </div>
 
-                {formData.insurance_policy && (
-                  <div className="bg-gray-50 rounded-lg p-4">
-                    <h3 className="font-medium text-gray-900 mb-2">Insurance</h3>
-                    <p className="text-sm text-gray-600">{formData.insurance_policy}</p>
-                  </div>
-                )}
+                <div className="bg-gray-50 rounded-lg p-4">
+                  <h3 className="font-medium text-gray-900 mb-2">Insurance</h3>
+                  <p className="text-sm text-gray-600">
+                    {formData.insurance_carrier} - {formData.insurance_policy}
+                  </p>
+                  <p className="text-sm text-gray-600">Expires: {formData.insurance_expiry}</p>
+                  <p className="text-sm text-gray-600">
+                    Covers delivery / business use: {formData.insurance_business_use ? 'Yes' : 'No'}
+                  </p>
+                  <p className="text-sm text-gray-600">Registration expires: {formData.registration_expiry}</p>
+                </div>
 
                 <div className="bg-gray-50 rounded-lg p-4">
-                  <h3 className="font-medium text-gray-900 mb-2">Documents Uploaded</h3>
-                  <div className="grid grid-cols-2 gap-2 text-sm">
-                    <div className="flex items-center">
-                      {formData.license_front_url ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                      ) : (
-                        <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
-                      )}
-                      <span className={formData.license_front_url ? 'text-gray-700' : 'text-gray-400'}>
-                        License Front
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      {formData.license_back_url ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                      ) : (
-                        <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
-                      )}
-                      <span className={formData.license_back_url ? 'text-gray-700' : 'text-gray-400'}>
-                        License Back
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      {formData.insurance_card_url ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                      ) : (
-                        <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
-                      )}
-                      <span className={formData.insurance_card_url ? 'text-gray-700' : 'text-gray-400'}>
-                        Insurance Card
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      {formData.registration_url ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                      ) : (
-                        <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
-                      )}
-                      <span className={formData.registration_url ? 'text-gray-700' : 'text-gray-400'}>
-                        Registration
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      {formData.vehicle_photo_front_url ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                      ) : (
-                        <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
-                      )}
-                      <span className={formData.vehicle_photo_front_url ? 'text-gray-700' : 'text-gray-400'}>
-                        Vehicle Front
-                      </span>
-                    </div>
-                    <div className="flex items-center">
-                      {formData.vehicle_photo_back_url ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
-                      ) : (
-                        <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
-                      )}
-                      <span className={formData.vehicle_photo_back_url ? 'text-gray-700' : 'text-gray-400'}>
-                        Vehicle Back
-                      </span>
-                    </div>
-                  </div>
+                  <h3 className="font-medium text-gray-900 mb-2">Photos Added</h3>
+                  <ul className="grid grid-cols-1 gap-1 text-sm">
+                    {[
+                      { id: 'license_front', label: 'License front', done: !!formData.license_front_url, required: false },
+                      { id: 'license_back', label: 'License back', done: !!formData.license_back_url, required: false },
+                      ...PHOTO_ITEMS.map((d) => ({
+                        id: d.id,
+                        label: d.label,
+                        done: !!itemPaths[d.id as ProfileItemId],
+                        required: d.required,
+                      })),
+                    ].map((row) => (
+                      <li key={row.id} className="flex items-center">
+                        {row.done ? (
+                          <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
+                        ) : (
+                          <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
+                        )}
+                        <span className={row.done ? 'text-gray-700' : 'text-gray-400'}>
+                          {row.label}
+                          {!row.required && !row.id.startsWith('license') ? ' (extra)' : ''}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
 

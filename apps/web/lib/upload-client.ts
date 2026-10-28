@@ -154,3 +154,57 @@ export async function uploadDriverDocument(
   }
   return { path: storedPath, file: prepared };
 }
+
+/**
+ * P-366: shrinks (if a photo) and uploads a driver profile item to
+ * /api/driver/profile/upload, which stores it in the caller's own folder.
+ * record=true also saves it on the driver's profile as 'pending' (profile
+ * retakes); onboarding passes record=false and saves the paths on submit.
+ */
+export async function uploadProfileItemPhoto(
+  file: File,
+  item: string,
+  { allowPdf, record }: { allowPdf: boolean; record: boolean }
+): Promise<{ path: string; file: File }> {
+  const pdf = isPdfFile(file);
+  if (!isImageFile(file) && !(allowPdf && pdf)) {
+    throw new UploadError(
+      allowPdf ? 'Please choose a photo or a PDF.' : 'Please choose a photo (JPG, PNG, or iPhone photo).'
+    );
+  }
+  let prepared = pdf ? file : await shrinkImage(file);
+  if (!pdf && !prepared.type) {
+    prepared = new File([prepared], prepared.name, { type: 'image/jpeg' });
+  }
+  if (prepared.size > MAX_UPLOAD_BYTES) {
+    throw new UploadError(
+      pdf
+        ? 'This PDF is too large (over 4 MB). Take a photo of the document instead.'
+        : 'This photo is too large to send. Please take a new photo.'
+    );
+  }
+
+  const body = new FormData();
+  body.append('file', prepared);
+  body.append('item', item);
+  if (record) body.append('record', '1');
+
+  let res: Response;
+  try {
+    res = await fetch('/api/driver/profile/upload', { method: 'POST', body });
+  } catch {
+    throw new UploadError('Upload failed. Check your signal and try again.');
+  }
+  let data: { path?: string; error?: string } = {};
+  try {
+    data = await res.json();
+  } catch {
+    // keep empty
+  }
+  if (!res.ok || !data.path) {
+    if (res.status === 413) throw new UploadError('This file is too large. Please take a new photo and try again.');
+    if (res.status === 429) throw new UploadError('Too many uploads at once. Wait a minute and try again.');
+    throw new UploadError(data.error || 'Upload failed. Please try again.');
+  }
+  return { path: data.path, file: prepared };
+}

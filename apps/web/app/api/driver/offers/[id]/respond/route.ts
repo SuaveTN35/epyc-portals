@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { getCallerDriver } from '@/lib/server/driver-session';
 import { evaluateOfferResponse, parseOfferAction } from '@/lib/job-offers';
+import { blockedAcceptMessage, loadOfferBlockReason } from '@/lib/server/driver-eligibility';
 
 /**
  * POST /api/driver/offers/:id/respond   body: { action: 'accept' | 'decline' }
@@ -15,6 +16,11 @@ import { evaluateOfferResponse, parseOfferAction } from '@/lib/job-offers';
  * exactly one UPDATE matches a row; the other gets 409 "Job already taken".
  *
  * Declining is never held against the driver: it only sets the offer status.
+ *
+ * Insurance (P-366): accepting is refused with 403 when the driver's
+ * insurance is expired, missing, or not approved by dispatch. The database
+ * enforces the same rule on the assignment (guard_new_work_insurance), so a
+ * race with an expiry cannot slip through. Declining is always allowed.
  */
 export async function POST(
   request: NextRequest,
@@ -67,6 +73,13 @@ export async function POST(
   const deliveryId = offer!.delivery_id;
   const now = new Date().toISOString();
 
+  if (action === 'accept') {
+    const blocked = await loadOfferBlockReason(admin, driverId);
+    if (blocked) {
+      return NextResponse.json({ error: blockedAcceptMessage(blocked), blocked_reason: blocked }, { status: 403 });
+    }
+  }
+
   if (action === 'decline') {
     const { error } = await admin
       .from('job_offers')
@@ -89,6 +102,10 @@ export async function POST(
     .select('id');
 
   if (assignError) {
+    if (assignError.code === '42501') {
+      // guard_new_work_insurance refused it (insurance changed in the meantime).
+      return NextResponse.json({ error: blockedAcceptMessage('insurance is not current or not approved') }, { status: 403 });
+    }
     return NextResponse.json({ error: `Could not accept: ${assignError.message}` }, { status: 500 });
   }
   if (!won || won.length === 0) {

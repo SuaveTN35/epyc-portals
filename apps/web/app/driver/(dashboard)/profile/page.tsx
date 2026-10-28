@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { VEHICLE_CONFIG, LOYALTY_TIER_CONFIG } from '@epyc/shared';
 import { SmsOptInToggle } from '@/components/driver/SmsOptInToggle';
+import { DriverProfileChecklist } from '@/components/driver/DriverProfileChecklist';
 
 export default async function ProfilePage() {
   const supabase = await createClient();
@@ -34,6 +35,11 @@ export default async function ProfilePage() {
   if (!driver) {
     redirect('/driver/onboarding');
   }
+
+  const { data: reviewRows } = await supabase
+    .from('driver_review_items')
+    .select('item, photo_path, status, reason, uploaded_at, reviewed_at')
+    .eq('driver_id', driver.id);
 
   const profile = driver.profiles;
   const vehicleConfig = VEHICLE_CONFIG[driver.vehicle_type as keyof typeof VEHICLE_CONFIG];
@@ -137,6 +143,9 @@ export default async function ProfilePage() {
           )}
         </div>
       </div>
+
+      {/* P-366: vehicle, insurance, registration, equipment checklist */}
+      <DriverProfileChecklist driver={driver} reviews={reviewRows || []} />
 
       {/* Certifications */}
       <div className="bg-white rounded-xl shadow-sm mb-4">

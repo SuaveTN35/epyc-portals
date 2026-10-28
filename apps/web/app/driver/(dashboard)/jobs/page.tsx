@@ -26,6 +26,7 @@ export default function JobsPage() {
   const [jobOffers, setJobOffers] = useState<DriverOfferPayload[]>([]);
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [blockedReason, setBlockedReason] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -53,6 +54,7 @@ export default function JobsPage() {
         setError(body.error || 'Could not load job offers.');
       } else {
         setJobOffers(body.offers || []);
+        setBlockedReason(typeof body.blocked_reason === 'string' ? body.blocked_reason : null);
       }
     } catch {
       setError('Could not load job offers. Check your signal.');
@@ -180,6 +182,18 @@ export default function JobsPage() {
           Refresh
         </button>
       </div>
+
+      {blockedReason && (
+        <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-3">
+          <p className="text-sm font-medium text-red-800">No new job offers right now</p>
+          <p className="text-sm text-red-700 mt-1">
+            {blockedReason}. Upload your current insurance card on your Profile; dispatch must approve it.
+          </p>
+          <a href="/driver/profile#vehicle-insurance" className="inline-block mt-2 text-sm font-medium text-red-800 underline">
+            Go to Profile
+          </a>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 rounded-xl p-3 flex items-start">

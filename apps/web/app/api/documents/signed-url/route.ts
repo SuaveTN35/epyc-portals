@@ -17,7 +17,19 @@ const ALLOWED_PREFIXES = [
   'insurance/',
   'registration/',
   'vehicles/',
+  // P-366: driver-owned folder drivers/<profile_id>/...
+  'drivers/',
 ];
+
+const MAX_BATCH = 30;
+
+function isAllowedPath(path: unknown): path is string {
+  return (
+    typeof path === 'string' &&
+    !path.includes('..') &&
+    ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix))
+  );
+}
 
 const EXPIRY_SECONDS = 300;
 
@@ -50,17 +62,38 @@ export async function POST(request: NextRequest) {
   }
 
   let path: unknown;
+  let paths: unknown;
   try {
-    ({ path } = await request.json());
+    ({ path, paths } = await request.json());
   } catch {
     return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
   }
 
-  if (typeof path !== 'string' || path.includes('..')) {
-    return NextResponse.json({ error: 'invalid_path' }, { status: 400 });
+  // Batch form (P-366 review panel): { paths: string[] } -> { urls: { path: url } }.
+  // Paths outside the allowed folders are left out of the answer.
+  if (paths !== undefined) {
+    if (!Array.isArray(paths) || paths.length > MAX_BATCH) {
+      return NextResponse.json({ error: 'invalid_payload' }, { status: 400 });
+    }
+    const allowed = paths.filter(isAllowedPath);
+    if (allowed.length === 0) return NextResponse.json({ urls: {}, expires_in: EXPIRY_SECONDS });
+    const batchAdmin = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    const { data, error } = await batchAdmin.storage
+      .from('driver-documents')
+      .createSignedUrls(allowed, EXPIRY_SECONDS);
+    if (error) {
+      console.error('[documents/signed-url] batch failed:', error.message);
+      return NextResponse.json({ error: 'signing_failed' }, { status: 500 });
+    }
+    const urls: Record<string, string> = {};
+    for (const d of data || []) if (d.path && d.signedUrl) urls[d.path] = d.signedUrl;
+    return NextResponse.json({ urls, expires_in: EXPIRY_SECONDS });
   }
 
-  if (!ALLOWED_PREFIXES.some((prefix) => path.startsWith(prefix))) {
+  if (!isAllowedPath(path)) {
     return NextResponse.json({ error: 'invalid_path' }, { status: 400 });
   }
 

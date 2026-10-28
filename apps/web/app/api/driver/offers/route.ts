@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { getCallerDriver } from '@/lib/server/driver-session';
 import { packageSummary, type DriverOfferPayload } from '@/lib/job-offers';
+import { loadOfferBlockReason } from '@/lib/server/driver-eligibility';
 
 /**
  * GET /api/driver/offers - the caller's open job offers.
@@ -25,6 +26,14 @@ export async function GET(request: NextRequest) {
   }
   if (!caller.driver || caller.driver.status !== 'active') {
     return NextResponse.json({ error: 'Your driver account is not active' }, { status: 403 });
+  }
+
+  // P-366: no new offers while insurance is expired or not approved. Offers
+  // already sent stay hidden (accept would be refused anyway); the screen
+  // shows why. Jobs already assigned are unaffected.
+  const blockedReason = await loadOfferBlockReason(caller.admin, caller.driver.id);
+  if (blockedReason) {
+    return NextResponse.json({ offers: [], blocked_reason: blockedReason });
   }
 
   const { data, error } = await caller.admin
