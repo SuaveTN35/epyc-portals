@@ -31,6 +31,7 @@ const STATE_LABEL = {
   unreviewed: 'On file, not reviewed',
   rejected: 'Rejected',
   missing: 'Missing',
+  declared: 'Owns it, no photo',
 } as const;
 
 function ExpiryTag({ date }: { date: string | null | undefined }) {
@@ -60,7 +61,7 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
     const supabase = createClient();
     const { data, error: loadError } = await supabase
       .from('driver_review_items')
-      .select('item, photo_path, status, reason, uploaded_at, reviewed_at')
+      .select('item, photo_path, status, reason, owned, uploaded_at, reviewed_at')
       .eq('driver_id', driver.id);
     if (loadError) setError('Could not load review items.');
     setRows((data as ReviewRow[]) || []);
@@ -98,7 +99,14 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
       const res = await fetch(`/api/dispatch/drivers/${driver.id}/review`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ item: s.def.id, decision, reason, photo_path: s.path }),
+        // uploaded_at is the review version this page showed (QA N2).
+        body: JSON.stringify({
+          item: s.def.id,
+          decision,
+          reason,
+          photo_path: s.path,
+          uploaded_at: reviewRow[s.def.id]?.uploaded_at ?? null,
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -128,12 +136,14 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-medium text-gray-900">{s.def.label}</span>
-              <span className={`text-[11px] px-1.5 py-0.5 rounded ${s.def.required ? 'bg-gray-100 text-gray-700' : 'bg-emerald-50 text-emerald-700'}`}>
-                {s.def.required ? 'Required' : 'Extra'}
-              </span>
+              {s.def.group !== 'equipment' && (
+                <span className={`text-[11px] px-1.5 py-0.5 rounded ${s.def.required ? 'bg-gray-100 text-gray-700' : 'bg-gray-50 text-gray-600'}`}>
+                  {s.def.required ? 'Required' : 'Optional'}
+                </span>
+              )}
             </div>
             <p className={`text-xs ${s.state === 'rejected' ? 'text-red-700' : 'text-gray-500'}`}>
-              {STATE_LABEL[s.state]}
+              {s.def.group === 'equipment' && s.state === 'missing' ? 'Not listed' : STATE_LABEL[s.state]}
               {s.state === 'rejected' && s.reason ? `: ${s.reason}` : ''}
               {r?.reviewed_at && (s.state === 'approved' || s.state === 'rejected')
                 ? ` (${new Date(r.reviewed_at).toLocaleDateString()})`
@@ -188,7 +198,7 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
                   <img src={url} alt={s.def.label} className="w-12 h-12 rounded object-cover bg-gray-100" />
                 </a>
               ))}
-            {s.state !== 'missing' && rejecting !== s.def.id && (
+            {s.state !== 'missing' && (s.def.kind === 'data' || !!s.path) && rejecting !== s.def.id && (
               <>
                 {s.state !== 'approved' && (
                   <button
@@ -220,9 +230,10 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
     );
   };
 
-  const groups: ProfileItemGroup[] = ['documents', 'vehicle', 'equipment'];
-  const required = items.filter((s) => s.def.required);
-  const extras = items.filter((s) => !s.def.required);
+  const groups: ProfileItemGroup[] = ['documents', 'vehicle'];
+  const required = items.filter((s) => s.def.group === 'documents' || s.def.group === 'vehicle');
+  const gear = items.filter((s) => s.def.group === 'equipment');
+  const badge = items.filter((s) => s.def.group === 'badge');
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
@@ -287,10 +298,17 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
               <ul className="divide-y divide-gray-100">{required.filter((s) => s.def.group === g).map(renderItem)}</ul>
             </div>
           ))}
-          {extras.length > 0 && (
+          <div>
+            <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mt-2">Gear the driver owns (declared, optional)</h3>
+            <p className="text-xs text-gray-500">
+              Never required. Used for matching; each job lists the gear it needs and the driver may decline.
+            </p>
+            <ul className="divide-y divide-gray-100">{gear.map(renderItem)}</ul>
+          </div>
+          {badge.length > 0 && (
             <div>
-              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mt-2">Extras (optional)</h3>
-              <ul className="divide-y divide-gray-100">{extras.map(renderItem)}</ul>
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-500 mt-2">ID badge photo (after approval)</h3>
+              <ul className="divide-y divide-gray-100">{badge.map(renderItem)}</ul>
             </div>
           )}
         </>

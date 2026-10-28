@@ -41,7 +41,7 @@ export default async function DriverDashboardLayout({
   // P-366: insurance / registration warnings and missing REQUIRED items.
   const { data: reviewRows } = await supabase
     .from('driver_review_items')
-    .select('item, photo_path, status, reason')
+    .select('item, photo_path, status, reason, owned')
     .eq('driver_id', driver.id);
   const today = pacificToday();
   const warnings = driverWarnings(driver, reviewRows || [], today);

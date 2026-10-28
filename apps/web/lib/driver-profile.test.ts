@@ -7,7 +7,13 @@ import {
   profileGaps,
   dispatchBadges,
   driverHasEquipment,
-  approvedExtras,
+  driverDeclaresEquipment,
+  declaredGear,
+  gearMatch,
+  gearLabels,
+  parseRequiredEquipment,
+  isItemRequired,
+  isHeicFile,
   driverWarnings,
   validateDimensions,
   validateInsuranceDetails,
@@ -20,7 +26,7 @@ import {
   type DriverProfileFields,
   type ReviewRow,
 } from './driver-profile';
-import { PROFILE_ITEMS, REQUIRED_ITEMS, EXTRA_ITEMS, getProfileItem } from './driver-profile-items';
+import { PROFILE_ITEMS, REQUIRED_ITEMS, GEAR_ITEMS, getProfileItem } from './driver-profile-items';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -49,7 +55,10 @@ const fullDriver: DriverProfileFields = {
   cargo_capacity_lbs: 2000,
 };
 
-function approvedRows(d: DriverProfileFields, ids = PROFILE_ITEMS.map((i) => i.id) as string[]): ReviewRow[] {
+function approvedRows(
+  d: DriverProfileFields,
+  ids = PROFILE_ITEMS.filter((i) => i.group !== 'badge').map((i) => i.id) as string[]
+): ReviewRow[] {
   return ids.map((id) => {
     const def = getProfileItem(id)!;
     const path = def.kind === 'data' ? null : def.column ? (d[def.column] as string) : `drivers/${P}/${id}.jpg`;
@@ -132,14 +141,35 @@ describe('offerBlockReason (insurance eligibility)', () => {
 });
 
 describe('item config', () => {
-  it('has the Commander default required/plus split', () => {
-    expect(EXTRA_ITEMS.map((i) => i.id).sort()).toEqual(['cooler_temp_kit', 'hand_truck', 'straps_blankets']);
+  it('requires vehicle and document items only (Commander ruling 2026-10-28)', () => {
     expect(REQUIRED_ITEMS.map((i) => i.id).sort()).toEqual(
-      [
-        'boots', 'cargo_dimensions', 'gloves', 'hi_vis_vest', 'insurance_card', 'mask', 'registration',
-        'safety_glasses', 'vehicle_back', 'vehicle_cargo', 'vehicle_front', 'vehicle_side',
-      ].sort()
+      ['cargo_dimensions', 'insurance_card', 'registration', 'vehicle_back', 'vehicle_cargo', 'vehicle_front', 'vehicle_side'].sort()
     );
+  });
+  it('every gear item is declared, never required (TRIBUNAL R12)', () => {
+    expect(GEAR_ITEMS.map((i) => i.id).sort()).toEqual(
+      ['boots', 'cooler_temp_kit', 'gloves', 'hand_truck', 'hi_vis_vest', 'mask', 'safety_glasses', 'straps_blankets']
+    );
+    expect(GEAR_ITEMS.every((i) => i.required === false)).toBe(true);
+    expect(getProfileItem('id_badge_photo')).toMatchObject({ group: 'badge', required: false });
+  });
+  it('gear never gates even if a flag is flipped to required by mistake', () => {
+    const def = getProfileItem('gloves')! as { required: boolean };
+    const saved = def.required;
+    def.required = true;
+    try {
+      expect(onboardingMissing({}).map((d) => d.id)).not.toContain('gloves');
+      expect(profileGaps(fullDriver, approvedRows(fullDriver, REQUIRED_ITEMS.map((i) => i.id)))).toEqual([]);
+      expect(isItemRequired('gloves')).toBe(false);
+    } finally {
+      def.required = saved;
+    }
+  });
+  it('isItemRequired reads the config (QA N5)', () => {
+    expect(isItemRequired('cargo_dimensions')).toBe(true);
+    expect(isItemRequired('insurance_card')).toBe(true);
+    expect(isItemRequired('registration')).toBe(true);
+    expect(isItemRequired('hand_truck')).toBe(false);
   });
   it('every item id is allowed by the database CHECK, required or not', () => {
     const sql = readFileSync(
@@ -154,16 +184,31 @@ describe('item config', () => {
 describe('checklist / equipment completeness', () => {
   it('a fully approved driver is all approved with no gaps', () => {
     const rows = approvedRows(fullDriver);
-    expect(checklist(fullDriver, rows).every((s) => s.state === 'approved')).toBe(true);
+    const states = checklist(fullDriver, rows);
+    expect(states.filter((s) => s.def.group !== 'badge').every((s) => s.state === 'approved')).toBe(true);
+    expect(states.find((s) => s.def.id === 'id_badge_photo')!.state).toBe('missing'); // optional, never a gap
     expect(profileGaps(fullDriver, rows)).toEqual([]);
   });
 
-  it('missing plus items never create a gap or a badge', () => {
+  it('missing gear never creates a gap or a badge', () => {
     const rows = approvedRows(fullDriver, REQUIRED_ITEMS.map((i) => i.id));
     expect(profileGaps(fullDriver, rows)).toEqual([]);
     expect(dispatchBadges(fullDriver, rows, TODAY)).toEqual([]);
-    const extras = checklist(fullDriver, rows).filter((s) => !s.def.required);
-    expect(extras.every((s) => s.state === 'missing')).toBe(true);
+    const gear = checklist(fullDriver, rows).filter((s) => s.def.group === 'equipment');
+    expect(gear.every((s) => s.state === 'missing')).toBe(true);
+  });
+
+  it('gear: declared without photo, un-declared, and photo states', () => {
+    const rows: ReviewRow[] = [
+      { item: 'boots', photo_path: null, status: 'pending', reason: null, owned: true },
+      { item: 'gloves', photo_path: 'g.jpg', status: 'approved', reason: null, owned: false },
+      { item: 'mask', photo_path: 'm.jpg', status: 'pending', reason: null, owned: true },
+    ];
+    const st = Object.fromEntries(checklist(fullDriver, rows).map((s) => [s.def.id, s.state]));
+    expect(st.boots).toBe('declared');
+    expect(st.gloves).toBe('missing'); // no longer owned
+    expect(st.mask).toBe('pending');
+    expect(profileGaps(fullDriver, approvedRows(fullDriver, REQUIRED_ITEMS.map((i) => i.id)).concat(rows))).toEqual([]);
   });
 
   it('a legacy driver with only old columns gets gaps per group (never a block on its own)', () => {
@@ -176,8 +221,7 @@ describe('checklist / equipment completeness', () => {
     };
     const gaps = profileGaps(legacy, []);
     const groups = gaps.map((g) => g.group);
-    expect(groups).toEqual(['insurance', 'registration', 'vehicle_photos', 'dimensions', 'equipment']);
-    expect(gaps.find((g) => g.group === 'equipment')!.missing).toHaveLength(5); // required equipment only
+    expect(groups).toEqual(['insurance', 'registration', 'vehicle_photos', 'dimensions']); // never gear
     expect(gaps.find((g) => g.group === 'vehicle_photos')!.missing).toEqual([
       'Vehicle - back', 'Vehicle - side', 'Cargo area',
     ]);
@@ -187,14 +231,20 @@ describe('checklist / equipment completeness', () => {
     expect(states.vehicle_front).toBe('unreviewed');
   });
 
-  it('rejected required items show as a redo gap; pending does not', () => {
+  it('rejected required items show as a redo gap; pending does not; rejected gear never does', () => {
     const rows = approvedRows(fullDriver).map((r) =>
-      r.item === 'gloves' ? { ...r, status: 'rejected', reason: 'Blurry' } : r.item === 'boots' ? { ...r, status: 'pending' } : r
+      r.item === 'vehicle_side'
+        ? { ...r, status: 'rejected', reason: 'Blurry' }
+        : r.item === 'vehicle_back'
+        ? { ...r, status: 'pending' }
+        : r.item === 'gloves'
+        ? { ...r, status: 'rejected', reason: 'Not gloves' }
+        : r
     );
     const gaps = profileGaps(fullDriver, rows);
-    expect(gaps).toEqual([{ group: 'equipment', label: 'Equipment', missing: ['Work gloves (redo)'] }]);
-    const gloves = checklist(fullDriver, rows).find((s) => s.def.id === 'gloves')!;
-    expect(gloves.reason).toBe('Blurry');
+    expect(gaps).toEqual([{ group: 'vehicle_photos', label: 'Vehicle photos', missing: ['Vehicle - side (redo)'] }]);
+    const side = checklist(fullDriver, rows).find((s) => s.def.id === 'vehicle_side')!;
+    expect(side.reason).toBe('Blurry');
   });
 
   it('a retaken document whose file changed shows as pending', () => {
@@ -208,15 +258,46 @@ describe('checklist / equipment completeness', () => {
     expect(checklist(d, approvedRows(fullDriver)).find((s) => s.def.id === 'cargo_dimensions')!.state).toBe('missing');
   });
 
-  it('driverHasEquipment / approvedExtras only count approved items', () => {
+  it('driverHasEquipment counts approved + owned; driverDeclaresEquipment counts owned', () => {
     const rows: ReviewRow[] = [
       { item: 'hand_truck', photo_path: 'x', status: 'approved', reason: null },
       { item: 'cooler_temp_kit', photo_path: 'y', status: 'pending', reason: null },
+      { item: 'boots', photo_path: null, status: 'pending', reason: null, owned: true },
+      { item: 'gloves', photo_path: 'z', status: 'approved', reason: null, owned: false },
     ];
     expect(driverHasEquipment(rows, 'hand_truck')).toBe(true);
     expect(driverHasEquipment(rows, 'cooler_temp_kit')).toBe(false);
-    expect(driverHasEquipment(rows, 'straps_blankets')).toBe(false);
-    expect(approvedExtras(rows).map((d) => d.id)).toEqual(['hand_truck']);
+    expect(driverHasEquipment(rows, 'gloves')).toBe(false); // un-declared
+    expect(driverDeclaresEquipment(rows, 'boots')).toBe(true);
+    expect(driverDeclaresEquipment(rows, 'gloves')).toBe(false);
+    expect(declaredGear(rows).map((g) => [g.def.id, g.approved])).toEqual([
+      ['boots', false],
+      ['hand_truck', true],
+      ['cooler_temp_kit', false],
+    ]);
+  });
+
+  it('gearMatch is informational: needed vs declared vs approved', () => {
+    const rows: ReviewRow[] = [
+      { item: 'hi_vis_vest', photo_path: 'v', status: 'approved', reason: null },
+      { item: 'boots', photo_path: null, status: 'pending', reason: null },
+    ];
+    expect(gearMatch(rows, ['hi_vis_vest', 'boots', 'safety_glasses', 'jetpack'])).toEqual({
+      needed: ['hi_vis_vest', 'boots', 'safety_glasses'],
+      declared: ['hi_vis_vest', 'boots'],
+      approved: ['hi_vis_vest'],
+      missing: ['safety_glasses'],
+    });
+    expect(gearMatch(rows, null).needed).toEqual([]);
+  });
+
+  it('parseRequiredEquipment / gearLabels', () => {
+    expect(parseRequiredEquipment(['boots', 'hi_vis_vest', 'boots'])).toEqual({ ok: true, value: ['hi_vis_vest', 'boots'] });
+    expect(parseRequiredEquipment(null)).toEqual({ ok: true, value: [] });
+    expect(parseRequiredEquipment(['jetpack'])).toMatchObject({ ok: false });
+    expect(parseRequiredEquipment('boots')).toMatchObject({ ok: false });
+    expect(parseRequiredEquipment(['insurance_card'])).toMatchObject({ ok: false }); // not gear
+    expect(gearLabels(['hi_vis_vest', 'x'])).toEqual(['Hi-vis safety vest']);
   });
 });
 
@@ -305,12 +386,16 @@ describe('storage paths', () => {
 
 describe('parseReviewDecision', () => {
   it('validates item, decision, and reason', () => {
-    expect(parseReviewDecision({ item: 'gloves', decision: 'approve', photo_path: 'p' })).toEqual({
+    const v = '2026-10-28T05:00:00.123456+00:00';
+    expect(parseReviewDecision({ item: 'gloves', decision: 'approve', photo_path: 'p', uploaded_at: v })).toEqual({
       ok: true,
-      value: { item: 'gloves', decision: 'approve', reason: null, photo_path: 'p' },
+      value: { item: 'gloves', decision: 'approve', reason: null, photo_path: 'p', uploaded_at: v },
     });
-    expect(parseReviewDecision({ item: 'gloves', decision: 'reject' })).toMatchObject({ ok: false });
-    expect(parseReviewDecision({ item: 'gloves', decision: 'reject', reason: ' Blurry ' })).toMatchObject({ ok: true, value: { reason: 'Blurry' } });
+    expect(parseReviewDecision({ item: 'gloves', decision: 'approve', photo_path: 'p' })).toMatchObject({ ok: false }); // N2: version required
+    expect(parseReviewDecision({ item: 'gloves', decision: 'approve', uploaded_at: 5 })).toMatchObject({ ok: false });
+    expect(parseReviewDecision({ item: 'insurance_card', decision: 'approve', uploaded_at: null })).toMatchObject({ ok: true, value: { uploaded_at: null } });
+    expect(parseReviewDecision({ item: 'gloves', decision: 'reject', uploaded_at: null })).toMatchObject({ ok: false });
+    expect(parseReviewDecision({ item: 'gloves', decision: 'reject', reason: ' Blurry ', uploaded_at: null })).toMatchObject({ ok: true, value: { reason: 'Blurry' } });
     expect(parseReviewDecision({ item: 'license', decision: 'approve' })).toMatchObject({ ok: false });
     expect(parseReviewDecision({ item: 'gloves', decision: 'maybe' })).toMatchObject({ ok: false });
     expect(parseReviewDecision(null)).toMatchObject({ ok: false });
@@ -318,11 +403,13 @@ describe('parseReviewDecision', () => {
 });
 
 describe('onboardingMissing', () => {
-  it('lists only required items; plus items never block', () => {
+  it('lists only required items; gear and the badge photo never block', () => {
     const all = Object.fromEntries(REQUIRED_ITEMS.map((i) => [i.id, true]));
     expect(onboardingMissing(all)).toEqual([]);
-    expect(onboardingMissing({}).map((d) => d.id)).not.toContain('hand_truck');
-    expect(onboardingMissing({ ...all, gloves: false }).map((d) => d.id)).toEqual(['gloves']);
+    const missing = onboardingMissing({}).map((d) => d.id);
+    for (const g of GEAR_ITEMS) expect(missing).not.toContain(g.id);
+    expect(missing).not.toContain('id_badge_photo');
+    expect(onboardingMissing({ ...all, registration: false }).map((d) => d.id)).toEqual(['registration']);
   });
 });
 
@@ -332,9 +419,21 @@ describe('readinessFor (dispatch offer picker)', async () => {
     const rows = approvedRows(fullDriver);
     const ok = readinessFor(fullDriver, rows, TODAY);
     expect(ok.blockReason).toBeNull();
-    expect(ok.extras.map((e) => e.id).sort()).toEqual(['cooler_temp_kit', 'hand_truck', 'straps_blankets']);
+    expect(ok.gear).toHaveLength(8);
+    expect(ok.gear.every((g) => g.approved)).toBe(true);
+    const withNeed = readinessFor(fullDriver, rows, TODAY, ['hi_vis_vest']);
+    expect(withNeed.match).toMatchObject({ approved: ['hi_vis_vest'], missing: [] });
     const expired = readinessFor({ ...fullDriver, insurance_expiry: '2026-10-01' }, rows, TODAY);
     expect(expired.blockReason).toBe('Insurance expired on 2026-10-01');
     expect(expired.badges.map((b) => b.label)).toContain('Insurance expired');
+  });
+});
+
+describe('isHeicFile (QA N4)', () => {
+  it('detects HEIC/HEIF by type or name', () => {
+    expect(isHeicFile({ type: 'image/heic', name: 'a' })).toBe(true);
+    expect(isHeicFile({ type: '', name: 'IMG_1.HEIC' })).toBe(true);
+    expect(isHeicFile({ type: 'image/heif', name: 'x' })).toBe(true);
+    expect(isHeicFile({ type: 'image/jpeg', name: 'IMG_1.jpg' })).toBe(false);
   });
 });

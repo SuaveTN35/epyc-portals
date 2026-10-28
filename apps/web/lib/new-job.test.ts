@@ -84,7 +84,17 @@ describe('buildNewJobRow', () => {
     expect(row.requires_signature).toBe(true);
     expect(row.requires_photo_pod).toBe(true);
     expect(row.loading_required).toBe(false);
+    expect(row.required_equipment).toEqual([]);
     expect(row.pickup_window_start).toBeNull();
+  });
+
+  it('keeps only known gear ids for the job gear list, in config order (P-366)', () => {
+    const row = buildNewJobRow(
+      { ...validForm, required_equipment: ['boots', 'jetpack', 'hi_vis_vest', 'boots'] },
+      'staff-1',
+      'EPYC1'
+    );
+    expect(row.required_equipment).toEqual(['hi_vis_vest', 'boots']);
   });
 });
 

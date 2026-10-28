@@ -22,6 +22,8 @@ export interface ChecklistDriver extends DriverProfileFields {
   vehicle_model?: string | null;
   vehicle_year?: number | null;
   vehicle_plate?: string | null;
+  /** drivers.status; the ID badge photo is offered only once 'active'. */
+  status?: string | null;
 }
 
 interface Props {
@@ -40,9 +42,10 @@ async function postDetails(body: Record<string, unknown>): Promise<void> {
 }
 
 /**
- * Driver profile: "Vehicle & insurance" details plus the checklist of every
- * item in lib/driver-profile-items.ts (required first, then extras). Every
- * upload or edit goes back to dispatch for approval.
+ * Driver profile: "Vehicle & insurance" (required documents and vehicle
+ * items from lib/driver-profile-items.ts), "Gear you own" (declared, photo
+ * optional, never required: TRIBUNAL R12), and, after approval only, the ID
+ * badge photo (R1). Every upload or edit goes back to dispatch for approval.
  */
 export function DriverProfileChecklist({ driver, reviews }: Props) {
   const router = useRouter();
@@ -68,6 +71,23 @@ export function DriverProfileChecklist({ driver, reviews }: Props) {
     };
   }, [paths]);
 
+  const ownedById = useMemo(() => {
+    const m: Record<string, boolean> = {};
+    for (const r of reviews) m[r.item] = r.owned !== false;
+    return m;
+  }, [reviews]);
+
+  const setOwned = (id: string) => async (owned: boolean) => {
+    const res = await fetch('/api/driver/profile/gear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ item: id, owned }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Could not save. Please try again.');
+    router.refresh();
+  };
+
   const upload = (s: ItemStatus) => async (file: File) => {
     await uploadProfileItemPhoto(file, s.def.id, { allowPdf: !!s.def.allowPdf, record: true });
     router.refresh();
@@ -82,6 +102,8 @@ export function DriverProfileChecklist({ driver, reviews }: Props) {
       thumbUrl={s.path ? thumbs[s.path] ?? null : null}
       isPdf={!!s.path && s.path.toLowerCase().endsWith('.pdf')}
       onFile={s.def.kind === 'photo' ? upload(s) : undefined}
+      owned={s.def.group === 'equipment' ? !!ownedById[s.def.id] : undefined}
+      onOwnedChange={s.def.group === 'equipment' ? setOwned(s.def.id) : undefined}
     >
       {s.def.id === 'cargo_dimensions' && <DimensionsForm driver={driver} onSaved={() => router.refresh()} />}
       {s.def.id === 'insurance_card' && <InsuranceForm driver={driver} onSaved={() => router.refresh()} />}
@@ -89,9 +111,10 @@ export function DriverProfileChecklist({ driver, reviews }: Props) {
     </ProfileItemRow>
   );
 
-  const required = items.filter((s) => s.def.required);
-  const extras = items.filter((s) => !s.def.required);
-  const groups: ProfileItemGroup[] = ['vehicle', 'documents', 'equipment'];
+  const required = items.filter((s) => s.def.group === 'vehicle' || s.def.group === 'documents');
+  const gear = items.filter((s) => s.def.group === 'equipment');
+  const badge = items.find((s) => s.def.group === 'badge');
+  const groups: ProfileItemGroup[] = ['vehicle', 'documents'];
 
   return (
     <>
@@ -131,13 +154,26 @@ export function DriverProfileChecklist({ driver, reviews }: Props) {
         </div>
       </div>
 
-      {extras.length > 0 && (
+      <div className="bg-white rounded-xl shadow-sm mb-4">
+        <div className="px-4 py-3 border-b border-gray-100">
+          <h3 className="font-semibold text-gray-900">Gear you own</h3>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Optional. Check what you own so dispatch can match you to jobs that need it. A photo helps but is not needed.
+            Each job offer lists any gear that job needs, and you can decline any job.
+          </p>
+        </div>
+        <ul className="px-4 divide-y divide-gray-100">{gear.map(row)}</ul>
+      </div>
+
+      {badge && driver.status === 'active' && (
         <div className="bg-white rounded-xl shadow-sm mb-4">
           <div className="px-4 py-3 border-b border-gray-100">
-            <h3 className="font-semibold text-gray-900">Extras that get you more jobs</h3>
-            <p className="text-xs text-gray-500 mt-0.5">Optional. Dispatch sees these when picking a driver for a job.</p>
+            <h3 className="font-semibold text-gray-900">ID badge photo</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Optional. Used only on your driver ID badge so customers know who is arriving.
+            </p>
           </div>
-          <ul className="px-4 divide-y divide-gray-100">{extras.map(row)}</ul>
+          <ul className="px-4">{row(badge)}</ul>
         </div>
       )}
     </>

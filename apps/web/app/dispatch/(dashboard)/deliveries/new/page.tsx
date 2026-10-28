@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Loader2, MapPin, Package, DollarSign, AlertCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { GEAR_ITEMS } from '@/lib/driver-profile-items';
 import { SERVICE_LEVEL_CONFIG, VEHICLE_CONFIG, generateTrackingNumber } from '@epyc/shared';
 import {
   EMPTY_NEW_JOB,
@@ -306,6 +307,36 @@ export default function NewJobPage() {
               />
               Loading required (driver loads or unloads)
             </label>
+            <div className="sm:col-span-2">
+              <p className="text-sm font-medium text-gray-700">Gear this job needs (optional)</p>
+              <p className="text-xs text-gray-500 mb-2">
+                For example, a site that asks for a vest and glasses. Drivers see this before accepting and can decline.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {GEAR_ITEMS.map((g) => {
+                  const on = form.required_equipment.includes(g.id);
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      onClick={() =>
+                        set(
+                          'required_equipment',
+                          on
+                            ? form.required_equipment.filter((x) => x !== g.id)
+                            : [...form.required_equipment, g.id]
+                        )
+                      }
+                      className={`text-xs px-2.5 py-1 rounded-full border ${
+                        on ? 'border-epyc-primary bg-emerald-50 text-gray-900' : 'border-gray-300 text-gray-600'
+                      }`}
+                    >
+                      {g.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         </div>
 

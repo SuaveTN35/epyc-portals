@@ -216,7 +216,7 @@ export default function DeliveriesPage() {
       setAvailableDrivers(
         data.map((d: any) => ({
           block_reason: readiness[d.id] ? readiness[d.id].blockReason : 'Insurance status unknown',
-          extras: (readiness[d.id]?.extras || []).map((x) => x.shortLabel || x.label),
+          extras: (readiness[d.id]?.gear || []).map((g) => g.def.shortLabel || g.def.label),
           id: d.id,
           full_name: d.profiles?.full_name || 'Unknown',
           vehicle_type: d.vehicle_type,

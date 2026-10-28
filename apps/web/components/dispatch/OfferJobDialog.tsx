@@ -10,6 +10,8 @@ import {
 } from '@/lib/job-offers';
 import { requestOfferTexts } from '@/lib/sms-client';
 import { loadDriverReadiness } from '@/lib/driver-readiness';
+import { GEAR_ITEMS, getProfileItem } from '@/lib/driver-profile-items';
+import { parseRequiredEquipment } from '@/lib/driver-profile';
 
 interface OfferDriver {
   id: string;
@@ -22,8 +24,8 @@ interface OfferDriver {
   has_open_offer: boolean;
   /** P-366: why this driver cannot get new offers (insurance), or null. */
   block_reason: string | null;
-  /** Approved optional equipment (dolly, blankets, cooler) for matching. */
-  extras: string[];
+  /** Gear the driver lists as owned; approved = dispatch approved its photo. */
+  gear: Array<{ id: string; approved: boolean }>;
 }
 
 interface OfferJobDialogProps {
@@ -49,11 +51,15 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
   const [expiry, setExpiry] = useState<number>(15);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // P-366 / TRIBUNAL R12: gear THIS job needs. Shown to the driver before
+  // accept; the driver may decline. Informational for matching, never a block.
+  const [needed, setNeeded] = useState<string[]>([]);
+  const [savedNeeded, setSavedNeeded] = useState<string[]>([]);
 
   useEffect(() => {
     const load = async () => {
       const supabase = createClient();
-      const [{ data: driverRows, error: driverError }, { data: openOffers }] = await Promise.all([
+      const [{ data: driverRows, error: driverError }, { data: openOffers }, { data: job }] = await Promise.all([
         supabase
           .from('drivers')
           .select(
@@ -67,7 +73,12 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
           .eq('delivery_id', delivery.id)
           .eq('status', 'pending')
           .gt('expires_at', new Date().toISOString()),
+        supabase.from('deliveries').select('required_equipment').eq('id', delivery.id).maybeSingle(),
       ]);
+      const jobGear = parseRequiredEquipment(job?.required_equipment ?? []);
+      const initialGear = jobGear.ok ? jobGear.value : [];
+      setNeeded(initialGear);
+      setSavedNeeded(initialGear);
 
       if (driverError) {
         setError(driverError.message);
@@ -90,7 +101,7 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
           // Unknown readiness (lookup failed) is treated as blocked; the
           // database refuses the offer anyway.
           block_reason: readiness[d.id] ? readiness[d.id].blockReason : 'Insurance status unknown',
-          extras: (readiness[d.id]?.extras || []).map((x) => x.shortLabel || x.label),
+          gear: (readiness[d.id]?.gear || []).map((g) => ({ id: g.def.id, approved: g.approved })),
         }))
       );
       setLoading(false);
@@ -116,6 +127,21 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
     setError(null);
 
     const supabase = createClient();
+
+    // Save the job's gear list first so every offered driver sees it.
+    if (needed.join(',') !== savedNeeded.join(',')) {
+      const { error: gearError } = await supabase
+        .from('deliveries')
+        .update({ required_equipment: needed })
+        .eq('id', delivery.id);
+      if (gearError) {
+        setError(`Could not save the gear list: ${gearError.message}`);
+        setSending(false);
+        return;
+      }
+      setSavedNeeded(needed);
+    }
+
     const expiresAt = offerExpiresAt(expiry);
     const rows = drivers
       .filter((d) => selected.has(d.id) && !d.block_reason)
@@ -184,6 +210,35 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
             </select>
           </div>
 
+          <div>
+            <p className="block text-sm font-medium text-gray-700 mb-1">Gear this job needs (optional)</p>
+            <p className="text-xs text-gray-500 mb-2">
+              Drivers see this before they accept and can decline. It does not stop anyone from being offered the job.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {GEAR_ITEMS.map((g) => {
+                const on = needed.includes(g.id);
+                return (
+                  <button
+                    key={g.id}
+                    type="button"
+                    onClick={() =>
+                      setNeeded((prev) => {
+                        const next = on ? prev.filter((x) => x !== g.id) : [...prev, g.id];
+                        return GEAR_ITEMS.map((d) => d.id).filter((id) => next.includes(id));
+                      })
+                    }
+                    className={`text-xs px-2 py-1 rounded-full border ${
+                      on ? 'border-epyc-primary bg-emerald-50 text-gray-900' : 'border-gray-300 text-gray-600'
+                    }`}
+                  >
+                    {g.shortLabel || g.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {loading ? (
             <div className="flex justify-center py-6">
               <Loader2 className="h-6 w-6 animate-spin text-epyc-primary" />
@@ -216,14 +271,22 @@ export function OfferJobDialog({ delivery, onClose, onSent }: OfferJobDialogProp
                       {d.block_reason && (
                         <p className="text-xs text-red-700">Cannot offer: {d.block_reason}</p>
                       )}
-                      {d.extras.length > 0 && (
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {d.extras.map((x) => (
-                            <span key={x} className="text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">
-                              {x}
-                            </span>
-                          ))}
-                        </div>
+                      {needed.length > 0 && (
+                        <p className="text-xs text-gray-600 mt-0.5">
+                          Gear for this job:{' '}
+                          {needed
+                            .map((id) => {
+                              const g = d.gear.find((x) => x.id === id);
+                              const name = getProfileItem(id)?.shortLabel || id;
+                              return `${name} ${g ? (g.approved ? '(approved)' : '(declared)') : '(not listed)'}`;
+                            })
+                            .join(', ')}
+                        </p>
+                      )}
+                      {needed.length === 0 && d.gear.length > 0 && (
+                        <p className="text-xs text-gray-500 mt-0.5">
+                          Owns: {d.gear.map((g) => getProfileItem(g.id)?.shortLabel || g.id).join(', ')}
+                        </p>
                       )}
                     </div>
                     <span

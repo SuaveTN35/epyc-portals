@@ -141,6 +141,11 @@ export interface DriverOfferPayload {
   service_level: string | null;
   requires_signature: boolean;
   requires_temperature_control: boolean;
+  /**
+   * P-366 / TRIBUNAL R12: labels of the gear this job needs, shown before
+   * accept. The driver may decline any offer without penalty.
+   */
+  required_equipment: string[];
 }
 
 /** "Tue 11/11, 9:00 AM - 11:00 AM" style window text, or null when unset. */

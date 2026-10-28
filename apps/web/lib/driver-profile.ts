@@ -7,8 +7,9 @@
 
 import {
   PROFILE_ITEMS,
-  EXTRA_ITEMS,
+  GEAR_ITEMS,
   getProfileItem,
+  isGearId,
   isProfileItemId,
   type ProfileItemDef,
   type ProfileItemGroup,
@@ -25,6 +26,8 @@ export interface ReviewRow {
   photo_path: string | null;
   status: ReviewStatus | string;
   reason: string | null;
+  /** Gear only: false when the driver no longer lists the item. */
+  owned?: boolean | null;
   uploaded_at?: string | null;
   reviewed_at?: string | null;
 }
@@ -135,8 +138,9 @@ export function offerBlockReason(
  * pending    submitted, waiting for dispatch
  * approved   dispatch approved this exact file / these values
  * rejected   dispatch rejected it (reason given); driver should redo it
+ * declared   gear only: the driver says they own it, no photo added
  */
-export type ItemState = 'missing' | 'unreviewed' | 'pending' | 'approved' | 'rejected';
+export type ItemState = 'missing' | 'unreviewed' | 'pending' | 'approved' | 'rejected' | 'declared';
 
 export interface ItemStatus {
   def: ProfileItemDef;
@@ -182,8 +186,12 @@ export function itemStatus(
     return { def, state: rowState(row), path: file, reason: row.status === 'rejected' ? row.reason : null };
   }
 
-  // Equipment: the review row is the only record.
-  if (!row || !row.photo_path) return { def, state: 'missing', path: null, reason: null };
+  // Gear and the badge photo: the review row is the only record. For gear,
+  // the row means "I own this"; owned = false or no row means not listed.
+  if (!row || row.owned === false) return { def, state: 'missing', path: null, reason: null };
+  if (!row.photo_path) {
+    return { def, state: def.group === 'equipment' ? 'declared' : 'missing', path: null, reason: null };
+  }
   return { def, state: rowState(row), path: row.photo_path, reason: row.status === 'rejected' ? row.reason : null };
 }
 
@@ -196,32 +204,89 @@ export function checklist(driver: DriverProfileFields, reviewRows: ReviewRow[] |
   return (PROFILE_ITEMS as readonly ProfileItemDef[]).map((def) => itemStatus(def, driver, reviews));
 }
 
-/** True when this approved extra (or any item) is approved. For job matching. */
+/** The driver lists this gear as owned (photo or not). */
+export function driverDeclaresEquipment(reviewRows: ReviewRow[] | null | undefined, item: ProfileItemId): boolean {
+  return (reviewRows || []).some((r) => r.item === item && r.owned !== false);
+}
+
+/** The driver owns this gear AND dispatch approved its photo. For job matching. */
 export function driverHasEquipment(
   reviewRows: ReviewRow[] | null | undefined,
   item: ProfileItemId
 ): boolean {
-  return (reviewRows || []).some((r) => r.item === item && r.status === 'approved' && !!r.photo_path);
+  return (reviewRows || []).some(
+    (r) => r.item === item && r.owned !== false && r.status === 'approved' && !!r.photo_path
+  );
 }
 
-/** Approved plus items (dolly, blankets, cooler) for dispatch screens. */
-export function approvedExtras(reviewRows: ReviewRow[] | null | undefined): ProfileItemDef[] {
-  return EXTRA_ITEMS.filter((def) => driverHasEquipment(reviewRows, def.id as ProfileItemId));
+export interface DeclaredGear {
+  def: ProfileItemDef;
+  approved: boolean;
+}
+
+/** Gear the driver lists as owned, with whether dispatch approved its photo. */
+export function declaredGear(reviewRows: ReviewRow[] | null | undefined): DeclaredGear[] {
+  return GEAR_ITEMS.filter((def) => driverDeclaresEquipment(reviewRows, def.id as ProfileItemId)).map((def) => ({
+    def,
+    approved: driverHasEquipment(reviewRows, def.id as ProfileItemId),
+  }));
+}
+
+export interface GearMatch {
+  needed: string[];
+  /** Needed items the driver lists as owned (approved or not). */
+  declared: string[];
+  /** Needed items owned with an approved photo. */
+  approved: string[];
+  /** Needed items the driver does not list. */
+  missing: string[];
+}
+
+/**
+ * Informational only (never a block): how a driver's declared gear lines up
+ * with what a job needs. The driver sees the list on the offer and may decline.
+ */
+export function gearMatch(reviewRows: ReviewRow[] | null | undefined, needed: readonly string[] | null | undefined): GearMatch {
+  const list = (needed || []).filter(isGearId);
+  return {
+    needed: list,
+    declared: list.filter((id) => driverDeclaresEquipment(reviewRows, id as ProfileItemId)),
+    approved: list.filter((id) => driverHasEquipment(reviewRows, id as ProfileItemId)),
+    missing: list.filter((id) => !driverDeclaresEquipment(reviewRows, id as ProfileItemId)),
+  };
+}
+
+/** Validates a job's "gear this job needs" list: known gear ids, de-duplicated, config order. */
+export function parseRequiredEquipment(value: unknown): Validation<string[]> {
+  if (value == null) return { ok: true, value: [] };
+  if (!Array.isArray(value)) return { ok: false, error: 'Gear list must be a list' };
+  for (const v of value) if (!isGearId(v)) return { ok: false, error: 'Unknown gear item' };
+  return { ok: true, value: GEAR_ITEMS.map((d) => d.id).filter((id) => value.includes(id)) };
+}
+
+/** Labels for a job's gear list, for the driver offer card. */
+export function gearLabels(ids: readonly string[] | null | undefined): string[] {
+  return (ids || []).filter(isGearId).map((id) => getProfileItem(id)!.label);
 }
 
 // ---------------------------------------------------------------------------
 // Gaps (REQUIRED items only) and dispatch badges
 // ---------------------------------------------------------------------------
 
-export type GapGroup = 'vehicle_photos' | 'dimensions' | 'registration' | 'equipment' | 'insurance';
+// Gear is never a gap (TRIBUNAL R12): no 'equipment' group here.
+export type GapGroup = 'vehicle_photos' | 'dimensions' | 'registration' | 'insurance';
 
 export const GAP_GROUP_LABELS: Record<GapGroup, string> = {
   vehicle_photos: 'Vehicle photos',
   dimensions: 'Dimensions',
   registration: 'Registration',
-  equipment: 'Equipment',
   insurance: 'Insurance',
 };
+
+/** Gear and the badge photo never count as missing, whatever the config says. */
+function canGate(def: ProfileItemDef): boolean {
+  return def.required && def.group !== 'equipment' && def.group !== 'badge';
+}
 
 export interface ProfileGap {
   group: GapGroup;
@@ -234,8 +299,7 @@ function gapGroupFor(def: ProfileItemDef): GapGroup {
   if (def.id === 'cargo_dimensions') return 'dimensions';
   if (def.id === 'insurance_card') return 'insurance';
   if (def.id === 'registration') return 'registration';
-  if (def.group === 'vehicle') return 'vehicle_photos';
-  return 'equipment';
+  return 'vehicle_photos';
 }
 
 /** Insurance form fields still blank (what the driver must fill in). */
@@ -268,14 +332,18 @@ export function profileGaps(driver: DriverProfileFields, reviewRows: ReviewRow[]
   };
 
   for (const s of checklist(driver, reviewRows)) {
-    if (!s.def.required) continue;
+    if (!canGate(s.def)) continue;
     if (s.state === 'missing') add(gapGroupFor(s.def), s.def.label);
     if (s.state === 'rejected') add(gapGroupFor(s.def), `${s.def.label} (redo)`);
   }
-  for (const f of insuranceDetailsMissing(driver)) add('insurance', f);
-  if (!driver.registration_expiry) add('registration', 'Registration expiry date');
+  if (getProfileItem('insurance_card')?.required) {
+    for (const f of insuranceDetailsMissing(driver)) add('insurance', f);
+  }
+  if (getProfileItem('registration')?.required && !driver.registration_expiry) {
+    add('registration', 'Registration expiry date');
+  }
 
-  const order: GapGroup[] = ['insurance', 'registration', 'vehicle_photos', 'dimensions', 'equipment'];
+  const order: GapGroup[] = ['insurance', 'registration', 'vehicle_photos', 'dimensions'];
   return order
     .filter((g) => groups.has(g))
     .map((g) => ({ group: g, label: GAP_GROUP_LABELS[g], missing: groups.get(g)! }));
@@ -318,7 +386,7 @@ export function dispatchBadges(
 
 /** Items waiting on dispatch (pending or unreviewed), for a count badge. */
 export function itemsAwaitingReview(driver: DriverProfileFields, reviewRows: ReviewRow[] | null | undefined): number {
-  return checklist(driver, reviewRows).filter((s) => s.state === 'pending' || s.state === 'unreviewed').length;
+  return checklist(driver, reviewRows).filter((s) => (s.state === 'pending' || s.state === 'unreviewed') && !!s.path).length;
 }
 
 // ---------------------------------------------------------------------------
@@ -475,6 +543,15 @@ export function formatLimits(d: DriverProfileFields): string | null {
 // Storage paths
 // ---------------------------------------------------------------------------
 
+/** QA N4: shown when a HEIC/HEIF photo could not be converted in the browser. */
+export const HEIC_MESSAGE =
+  'This phone photo format (HEIC) could not be opened. Take the photo again with the camera button, or set your camera to "Most Compatible" and retry.';
+
+export function isHeicFile(file: { type?: string; name?: string }): boolean {
+  const t = (file.type || '').toLowerCase();
+  return t === 'image/heic' || t === 'image/heif' || /\.(heic|heif)$/i.test(file.name || '');
+}
+
 const SAFE_FILE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,199}$/;
 
 /** drivers/<profileId>/<one safe file>. Mirrors is_driver_own_upload_path(). */
@@ -500,6 +577,12 @@ export interface ReviewDecision {
   reason: string | null;
   /** The file dispatch looked at; the route refuses if it has changed. */
   photo_path: string | null;
+  /**
+   * The review row version dispatch looked at (driver_review_items.uploaded_at,
+   * null when there was no row). Every driver write bumps it, so a change to
+   * insurance dates or limits after dispatch opened the page is caught (QA N2).
+   */
+  uploaded_at: string | null;
 }
 
 export function parseReviewDecision(body: unknown): Validation<ReviewDecision> {
@@ -516,12 +599,24 @@ export function parseReviewDecision(body: unknown): Validation<ReviewDecision> {
     if (reason.length > 500) return { ok: false, error: 'Reason is too long (500 characters max)' };
   }
   const photoPath = typeof b.photo_path === 'string' && b.photo_path ? b.photo_path : null;
-  return { ok: true, value: { item: b.item, decision: b.decision, reason, photo_path: photoPath } };
+  if (!('uploaded_at' in b) || (b.uploaded_at !== null && typeof b.uploaded_at !== 'string')) {
+    return { ok: false, error: 'Reload the page and review again' };
+  }
+  return {
+    ok: true,
+    value: { item: b.item, decision: b.decision, reason, photo_path: photoPath, uploaded_at: (b.uploaded_at as string | null) ?? null },
+  };
 }
 
-/** Required items not yet uploaded / entered during onboarding. */
+/** Required items not yet uploaded / entered during onboarding. Gear and the badge never block. */
 export function onboardingMissing(uploaded: Partial<Record<ProfileItemId, boolean>>): ProfileItemDef[] {
-  return (PROFILE_ITEMS as readonly ProfileItemDef[]).filter((d) => d.required && !uploaded[d.id as ProfileItemId]);
+  return (PROFILE_ITEMS as readonly ProfileItemDef[]).filter((d) => canGate(d) && !uploaded[d.id as ProfileItemId]);
+}
+
+/** Whether onboarding must collect this item's form data (QA N5: read from the config). */
+export function isItemRequired(id: ProfileItemId): boolean {
+  const def = getProfileItem(id);
+  return !!def && canGate(def);
 }
 
 export function groupOf(id: string): ProfileItemGroup | null {

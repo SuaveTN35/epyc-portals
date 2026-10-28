@@ -11,12 +11,14 @@ export const STATE_TEXT: Record<ItemState, string> = {
   unreviewed: 'Waiting for review',
   rejected: 'Needs a new photo',
   missing: 'Not added yet',
+  declared: 'You own this (photo optional)',
 };
 
 export function StateIcon({ state, className = 'h-5 w-5' }: { state: ItemState; className?: string }) {
   if (state === 'approved') return <CheckCircle className={`${className} text-green-600`} aria-label="Approved" />;
   if (state === 'pending' || state === 'unreviewed') return <Clock className={`${className} text-amber-500`} aria-label="Waiting for review" />;
   if (state === 'rejected') return <XCircle className={`${className} text-red-600`} aria-label="Rejected" />;
+  if (state === 'declared') return <CheckCircle className={`${className} text-gray-400`} aria-label="Owned, no photo" />;
   return <Circle className={`${className} text-gray-300`} aria-label="Missing" />;
 }
 
@@ -31,10 +33,14 @@ interface ProfileItemRowProps {
   onFile?: (file: File) => Promise<void>;
   /** Extra content under the row (e.g. the dimensions form). */
   children?: React.ReactNode;
+  /** Gear only (declared, never required): whether the driver says they own it. */
+  owned?: boolean;
+  onOwnedChange?: (owned: boolean) => Promise<void> | void;
 }
 
 /** One checklist line: status icon, label, Required/Extra tag, thumbnail, take/retake. */
-export function ProfileItemRow({ def, state, reason, thumbUrl, isPdf, onFile, children }: ProfileItemRowProps) {
+export function ProfileItemRow({ def, state, reason, thumbUrl, isPdf, onFile, children, owned, onOwnedChange }: ProfileItemRowProps) {
+  const isGear = def.group === 'equipment';
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -54,7 +60,28 @@ export function ProfileItemRow({ def, state, reason, thumbUrl, isPdf, onFile, ch
     }
   };
 
-  const buttonText = state === 'missing' ? (def.allowPdf ? 'Add' : 'Take photo') : 'Retake';
+  const buttonText = isGear
+    ? state === 'missing' || state === 'declared'
+      ? 'Add photo'
+      : 'Retake'
+    : state === 'missing'
+    ? def.allowPdf
+      ? 'Add'
+      : 'Take photo'
+    : 'Retake';
+
+  const toggleOwned = async (next: boolean) => {
+    if (!onOwnedChange) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onOwnedChange(next);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save. Please try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <li className="py-3">
@@ -63,25 +90,37 @@ export function ProfileItemRow({ def, state, reason, thumbUrl, isPdf, onFile, ch
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="font-medium text-gray-900">{def.label}</span>
-            {def.required ? (
+            {isGear ? null : def.required ? (
               <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-700">Required</span>
             ) : (
-              <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700">Extra</span>
+              <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-gray-50 text-gray-600">Optional</span>
             )}
           </div>
           <p className="text-xs text-gray-500 mt-0.5">{def.hint}</p>
+          {isGear && onOwnedChange && (
+            <label className="mt-1.5 inline-flex items-center gap-2 text-sm text-gray-800">
+              <input
+                type="checkbox"
+                className="h-5 w-5 rounded border-gray-300 text-epyc-primary"
+                checked={!!owned}
+                disabled={busy}
+                onChange={(e) => toggleOwned(e.target.checked)}
+              />
+              I own this
+            </label>
+          )}
           <p
             className={`text-xs mt-1 ${
               state === 'approved'
                 ? 'text-green-700'
                 : state === 'rejected'
                 ? 'text-red-700'
-                : state === 'missing'
+                : state === 'missing' || state === 'declared'
                 ? 'text-gray-500'
                 : 'text-amber-700'
             }`}
           >
-            {STATE_TEXT[state]}
+            {isGear && state === 'missing' ? 'Not listed' : STATE_TEXT[state]}
             {state === 'rejected' && reason ? `: ${reason}` : ''}
           </p>
           {error && <p className="text-xs text-red-700 mt-1">{error}</p>}
@@ -113,7 +152,7 @@ export function ProfileItemRow({ def, state, reason, thumbUrl, isPdf, onFile, ch
                   onClick={() => inputRef.current?.click()}
                   disabled={busy}
                   className={`inline-flex items-center text-sm px-3 py-2 rounded-lg touch-target disabled:opacity-50 ${
-                    state === 'missing' || state === 'rejected'
+                    !isGear && (state === 'missing' || state === 'rejected')
                       ? 'bg-epyc-primary text-white'
                       : 'border border-gray-300 text-gray-700'
                   }`}

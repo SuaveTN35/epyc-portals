@@ -83,6 +83,8 @@ vi.mock('@/lib/server/staff-session', () => ({
 import { POST as upload } from './upload/route';
 import { POST as details } from './details/route';
 import { POST as signedUrls } from './signed-urls/route';
+import { POST as gearRoute } from './gear/route';
+import { GET as offersList } from '../offers/route';
 import { POST as review } from '../../dispatch/drivers/[id]/review/route';
 import { POST as respond } from '../offers/[id]/respond/route';
 
@@ -156,6 +158,7 @@ describe('POST /api/driver/profile/upload', () => {
     const [up] = opsOf(state.sessionLog, 'driver_review_items', 'upsert');
     expect(up[1]).toMatchObject({ driver_id: 'drv-1', item: 'hand_truck' });
     expect((up[1] as { status?: string }).status).toBeUndefined(); // status is set by the DB guard, not the route
+    expect(up[1]).toMatchObject({ owned: true }); // a gear photo also declares the gear
     expect(opsOf(state.adminLog, 'driver_review_items', 'upsert')).toEqual([]);
   });
 
@@ -166,6 +169,47 @@ describe('POST /api/driver/profile/upload', () => {
     const body = await res.json();
     const [upd] = opsOf(state.sessionLog, 'drivers', 'update');
     expect(upd[1]).toEqual({ insurance_card_url: body.path });
+  });
+});
+
+describe('upload: HEIC and ID badge timing', () => {
+  it('refuses HEIC the browser could not convert, with a clear message (QA N4)', async () => {
+    const heic = new Blob([new Uint8Array([0, 0, 0, 24])], { type: 'image/heic' });
+    const res = await upload(formReq({ item: 'vehicle_front', file: heic }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/HEIC/);
+    expect(state.uploads).toEqual([]);
+  });
+
+  it('refuses the ID badge photo before approval, allows it once active (TRIBUNAL R1)', async () => {
+    state.sessionHandler = (t, _ops, term) =>
+      t === 'drivers' && term === 'maybeSingle' ? { data: { id: 'drv-1', status: 'pending' }, error: null } : { data: null, error: null };
+    let res = await upload(formReq({ item: 'id_badge_photo', file: jpeg(), record: '1' }));
+    expect(res.status).toBe(403);
+    res = await upload(formReq({ item: 'id_badge_photo', file: jpeg() })); // onboarding path, no record
+    expect(res.status).toBe(403);
+    expect(state.uploads).toEqual([]);
+    state.sessionHandler = (t, _ops, term) =>
+      t === 'drivers' && term === 'maybeSingle' ? { data: { id: 'drv-1', status: 'active' }, error: null } : { data: null, error: null };
+    res = await upload(formReq({ item: 'id_badge_photo', file: jpeg(), record: '1' }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('POST /api/driver/profile/gear (declared gear, R12)', () => {
+  it('declares or un-declares own gear with the session client', async () => {
+    state.sessionHandler = (t, _ops, term) =>
+      t === 'drivers' && term === 'maybeSingle' ? { data: { id: 'drv-1' }, error: null } : { data: null, error: null };
+    const res = await gearRoute(jsonReq('/api/driver/profile/gear', { item: 'boots', owned: false }));
+    expect(res.status).toBe(200);
+    const [up] = opsOf(state.sessionLog, 'driver_review_items', 'upsert');
+    expect(up[1]).toEqual({ driver_id: 'drv-1', item: 'boots', owned: false });
+  });
+  it('refuses non-gear items and bad bodies', async () => {
+    expect((await gearRoute(jsonReq('/x', { item: 'insurance_card', owned: true }))).status).toBe(400);
+    expect((await gearRoute(jsonReq('/x', { item: 'boots', owned: 'yes' }))).status).toBe(400);
+    state.user = null;
+    expect((await gearRoute(jsonReq('/x', { item: 'boots', owned: true }))).status).toBe(401);
   });
 });
 
@@ -239,7 +283,7 @@ describe('POST /api/dispatch/drivers/:id/review', () => {
   };
 
   it('refuses non-staff callers', async () => {
-    const res = await review(jsonReq('/x', { item: 'gloves', decision: 'approve' }), ctx('drv-1'));
+    const res = await review(jsonReq('/x', { item: 'gloves', decision: 'approve', uploaded_at: null }), ctx('drv-1'));
     expect(res.status).toBe(403);
   });
 
@@ -256,7 +300,7 @@ describe('POST /api/dispatch/drivers/:id/review', () => {
       if (t === 'driver_review_items' && ops.some((o) => o[0] === 'upsert')) return { data: { item: 'insurance_card', status: 'approved' }, error: null };
       return { data: null, error: null };
     };
-    const res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/legacy.jpg' }), ctx('drv-1'));
+    const res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/legacy.jpg', uploaded_at: null }), ctx('drv-1'));
     expect(res.status).toBe(200);
     const [up] = opsOf(state.adminLog, 'driver_review_items', 'upsert');
     expect(up[1]).toMatchObject({
@@ -268,7 +312,7 @@ describe('POST /api/dispatch/drivers/:id/review', () => {
   it('refuses to approve a photo dispatch did not see (driver retook it)', async () => {
     state.staff = { userId: 'staff-1' };
     state.adminHandler = (t) => (t === 'drivers' ? { data: driverRow, error: null } : { data: null, error: null });
-    const res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/older.jpg' }), ctx('drv-1'));
+    const res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/older.jpg', uploaded_at: null }), ctx('drv-1'));
     expect(res.status).toBe(409);
     expect(opsOf(state.adminLog, 'driver_review_items', 'upsert')).toEqual([]);
   });
@@ -276,8 +320,48 @@ describe('POST /api/dispatch/drivers/:id/review', () => {
   it('refuses to review an item with nothing uploaded, and incomplete dimensions', async () => {
     state.staff = { userId: 'staff-1' };
     state.adminHandler = (t) => (t === 'drivers' ? { data: driverRow, error: null } : { data: null, error: null });
-    expect((await review(jsonReq('/x', { item: 'gloves', decision: 'approve' }), ctx('drv-1'))).status).toBe(409);
-    expect((await review(jsonReq('/x', { item: 'cargo_dimensions', decision: 'approve' }), ctx('drv-1'))).status).toBe(409);
+    expect((await review(jsonReq('/x', { item: 'gloves', decision: 'approve', uploaded_at: null }), ctx('drv-1'))).status).toBe(409);
+    expect((await review(jsonReq('/x', { item: 'cargo_dimensions', decision: 'approve', uploaded_at: null }), ctx('drv-1'))).status).toBe(409);
+  });
+
+  it('QA N2: refuses when the review version changed since dispatch opened the page', async () => {
+    state.staff = { userId: 'staff-1' };
+    const V1 = '2026-10-28T05:00:00.111111+00:00';
+    const V2 = '2026-10-28T05:03:00.222222+00:00';
+    state.adminHandler = (t, ops, term) => {
+      if (t === 'drivers') return { data: driverRow, error: null };
+      if (t === 'driver_review_items' && term === 'maybeSingle') {
+        return { data: { photo_path: 'insurance/legacy.jpg', uploaded_at: V2, owned: true }, error: null };
+      }
+      if (t === 'driver_review_items' && ops.some((o) => o[0] === 'upsert')) return { data: { status: 'approved' }, error: null };
+      return { data: null, error: null };
+    };
+    // Same file, but the driver changed insurance dates after the page loaded.
+    let res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/legacy.jpg', uploaded_at: V1 }), ctx('drv-1'));
+    expect(res.status).toBe(409);
+    res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/legacy.jpg', uploaded_at: null }), ctx('drv-1'));
+    expect(res.status).toBe(409);
+    expect(opsOf(state.adminLog, 'driver_review_items', 'upsert')).toEqual([]);
+    res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/legacy.jpg', uploaded_at: V2 }), ctx('drv-1'));
+    expect(res.status).toBe(200);
+  });
+
+  it('QA N2: a request without a version is refused', async () => {
+    state.staff = { userId: 'staff-1' };
+    const res = await review(jsonReq('/x', { item: 'insurance_card', decision: 'approve', photo_path: 'insurance/legacy.jpg' }), ctx('drv-1'));
+    expect(res.status).toBe(400);
+  });
+
+  it('refuses to approve gear the driver no longer lists', async () => {
+    state.staff = { userId: 'staff-1' };
+    const V = '2026-10-28T05:00:00.1+00:00';
+    state.adminHandler = (t, _ops, term) => {
+      if (t === 'drivers') return { data: driverRow, error: null };
+      if (t === 'driver_review_items' && term === 'maybeSingle') return { data: { photo_path: 'g.jpg', uploaded_at: V, owned: false }, error: null };
+      return { data: null, error: null };
+    };
+    const res = await review(jsonReq('/x', { item: 'gloves', decision: 'approve', photo_path: 'g.jpg', uploaded_at: V }), ctx('drv-1'));
+    expect(res.status).toBe(409);
   });
 });
 
@@ -325,5 +409,34 @@ describe('POST /api/driver/offers/:id/respond (insurance block)', () => {
     const res = await respond(jsonReq('/x', { action: 'accept' }), ctx('off-1'));
     expect(res.status).toBe(200);
     expect(opsOf(state.adminLog, 'deliveries', 'update')).toHaveLength(1);
+  });
+});
+
+describe('GET /api/driver/offers (gear shown before accept)', () => {
+  it('includes the job gear list as labels, ignoring unknown ids', async () => {
+    state.callerDriver = { id: 'drv-1', status: 'active', current_delivery_id: null };
+    const future = new Date(Date.now() + 10 * 60_000).toISOString();
+    state.adminHandler = (t, _ops, term) => {
+      if (t === 'drivers' && term === 'maybeSingle') return { data: { insurance_card_url: 'c.jpg', insurance_expiry: '2099-01-01' }, error: null };
+      if (t === 'driver_review_items' && term === 'maybeSingle') return { data: { status: 'approved', photo_path: 'c.jpg' }, error: null };
+      if (t === 'job_offers') {
+        return {
+          data: [{
+            id: 'off-1', delivery_id: 'del-1', expires_at: future, created_at: future, estimated_payout: 40, distance_to_pickup_miles: 3,
+            delivery: {
+              status: 'booked', driver_id: null, pickup_city: 'A', pickup_state: 'CA', delivery_city: 'B', delivery_state: 'CA',
+              required_equipment: ['hi_vis_vest', 'safety_glasses', 'bogus'],
+            },
+          }],
+          error: null,
+        };
+      }
+      return { data: null, error: null };
+    };
+    ip += 1;
+    const res = await offersList(new NextRequest('http://localhost/api/driver/offers', { headers: { 'x-forwarded-for': `10.7.0.${ip % 250}` } }));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.offers[0].required_equipment).toEqual(['Hi-vis safety vest', 'Safety glasses']);
   });
 });

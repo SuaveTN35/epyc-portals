@@ -23,6 +23,7 @@ import { uploadProfileItemPhoto } from '@/lib/upload-client';
 import { PROFILE_ITEMS, type ProfileItemDef, type ProfileItemId } from '@/lib/driver-profile-items';
 import {
   DIMENSION_BOUNDS,
+  isItemRequired,
   onboardingMissing,
   pacificToday,
   validateDimensions,
@@ -30,7 +31,8 @@ import {
   validateRegistrationExpiry,
 } from '@/lib/driver-profile';
 
-const PHOTO_ITEMS = (PROFILE_ITEMS as readonly ProfileItemDef[]).filter((d) => d.kind === 'photo');
+// The ID badge photo is collected only after approval (TRIBUNAL R1), never here.
+const PHOTO_ITEMS = (PROFILE_ITEMS as readonly ProfileItemDef[]).filter((d) => d.kind === 'photo' && d.group !== 'badge');
 
 type Step = 'vehicle' | 'license' | 'documents' | 'photos' | 'review';
 
@@ -42,6 +44,8 @@ export default function DriverOnboardingPage() {
   // P-366 checklist photos: storage path and a local preview per item.
   const [itemPaths, setItemPaths] = useState<Partial<Record<ProfileItemId, string>>>({});
   const [itemPreviews, setItemPreviews] = useState<Partial<Record<ProfileItemId, string>>>({});
+  // Gear the applicant says they own (TRIBUNAL R12: declared, never required).
+  const [gearOwned, setGearOwned] = useState<Partial<Record<ProfileItemId, boolean>>>({});
 
   const [formData, setFormData] = useState({
     // Vehicle
@@ -89,22 +93,41 @@ export default function DriverOnboardingPage() {
 
   const today = pacificToday();
 
+  // QA N5: what onboarding insists on comes from lib/driver-profile-items.ts.
+  // A section whose item is not required is still validated if the applicant
+  // filled any of it in, and is simply left out when blank.
+  const anyFilled = (keys: string[]) =>
+    keys.some((k) => {
+      const v = (formData as Record<string, unknown>)[k];
+      return v !== '' && v !== null && v !== undefined;
+    });
+  const DIM_KEYS = ['cargo_length_in', 'cargo_width_in', 'cargo_height_in', 'cargo_capacity_lbs'];
+  const INS_KEYS = ['insurance_carrier', 'insurance_policy', 'insurance_expiry', 'insurance_bi_per_person', 'insurance_bi_per_accident', 'insurance_pd_limit', 'insurance_business_use'];
+  const sectionCheck = <T,>(required: boolean, keys: string[], run: () => { ok: true; value: T } | { ok: false; error: string }) =>
+    required || anyFilled(keys) ? run() : ({ ok: true as const, value: null });
+  const checkDims = () => sectionCheck(isItemRequired('cargo_dimensions'), DIM_KEYS, () => validateDimensions(formData));
+  const checkIns = () => sectionCheck(isItemRequired('insurance_card'), INS_KEYS, () => validateInsuranceDetails(formData, today));
+  const checkReg = () =>
+    sectionCheck(isItemRequired('registration'), ['registration_expiry'], () => validateRegistrationExpiry(formData, today));
+  const uploadedMap = () =>
+    Object.fromEntries(
+      PHOTO_ITEMS.map((d) => [d.id, !!itemPaths[d.id as ProfileItemId]]).concat([['cargo_dimensions', true]])
+    );
+
   const goNext = (next: Step) => {
     setError(null);
     if (step === 'vehicle') {
-      const v = validateDimensions(formData);
+      const v = checkDims();
       if (!v.ok) return setError(v.error);
     }
     if (step === 'documents') {
-      const ins = validateInsuranceDetails(formData, today);
+      const ins = checkIns();
       if (!ins.ok) return setError(ins.error);
-      const reg = validateRegistrationExpiry(formData, today);
+      const reg = checkReg();
       if (!reg.ok) return setError(reg.error);
     }
     if (step === 'photos') {
-      const missing = onboardingMissing(
-        Object.fromEntries(PHOTO_ITEMS.map((d) => [d.id, !!itemPaths[d.id as ProfileItemId]]).concat([['cargo_dimensions', true]]))
-      );
+      const missing = onboardingMissing(uploadedMap());
       if (missing.length > 0) {
         return setError(`Still needed: ${missing.map((d) => d.label).join(', ')}`);
       }
@@ -118,6 +141,7 @@ export default function DriverOnboardingPage() {
       record: false,
     });
     setItemPaths((prev) => ({ ...prev, [def.id]: path }));
+    if (def.group === 'equipment') setGearOwned((prev) => ({ ...prev, [def.id]: true }));
     setItemPreviews((prev) => {
       const old = prev[def.id as ProfileItemId];
       if (old) URL.revokeObjectURL(old);
@@ -143,12 +167,10 @@ export default function DriverOnboardingPage() {
     const maxWeightCapacity = vehicleConfig?.maxWeight || 50;
 
     // Re-check everything required before writing (P-366).
-    const dims = validateDimensions(formData);
-    const ins = validateInsuranceDetails(formData, today);
-    const reg = validateRegistrationExpiry(formData, today);
-    const missingItems = onboardingMissing(
-      Object.fromEntries(PHOTO_ITEMS.map((d) => [d.id, !!itemPaths[d.id as ProfileItemId]]).concat([['cargo_dimensions', true]]))
-    );
+    const dims = checkDims();
+    const ins = checkIns();
+    const reg = checkReg();
+    const missingItems = onboardingMissing(uploadedMap());
     if (!dims.ok || !ins.ok || !reg.ok || missingItems.length > 0) {
       setError(
         !dims.ok ? dims.error : !ins.ok ? ins.error : !reg.ok ? reg.error : `Still needed: ${missingItems.map((d) => d.label).join(', ')}`
@@ -167,13 +189,13 @@ export default function DriverOnboardingPage() {
       vehicle_year: formData.vehicle_year,
       vehicle_plate: formData.vehicle_plate,
       vehicle_vin: formData.vehicle_vin || null,
-      ...dims.value,
+      ...(dims.ok && dims.value ? dims.value : {}),
       has_temperature_control: formData.has_temperature_control,
       license_number: formData.license_number,
       license_state: formData.license_state,
       license_expiry: formData.license_expiry,
-      ...ins.value,
-      ...reg.value,
+      ...(ins.ok && ins.value ? ins.value : {}),
+      ...(reg.ok && reg.value ? reg.value : {}),
       max_weight_capacity: maxWeightCapacity,
       background_check_status: 'pending',
       // Document URLs
@@ -193,11 +215,12 @@ export default function DriverOnboardingPage() {
       return;
     }
 
-    // Equipment photos (required and extras) go to dispatch as 'pending'.
-    const equipmentRows = PHOTO_ITEMS.filter((d) => d.group === 'equipment' && itemPaths[d.id as ProfileItemId]).map((d) => ({
+    // Gear the applicant says they own (photo optional), as 'pending'.
+    const equipmentRows = PHOTO_ITEMS.filter((d) => d.group === 'equipment' && gearOwned[d.id as ProfileItemId]).map((d) => ({
       driver_id: created.id,
       item: d.id,
-      photo_path: itemPaths[d.id as ProfileItemId]!,
+      owned: true,
+      photo_path: itemPaths[d.id as ProfileItemId] ?? null,
     }));
     if (equipmentRows.length > 0) {
       const { error: equipmentError } = await supabase.from('driver_review_items').insert(equipmentRows);
@@ -691,14 +714,13 @@ export default function DriverOnboardingPage() {
               </div>
 
               {([
-                ['Vehicle', 'vehicle', true],
-                ['Insurance & Registration', 'documents', true],
-                ['Equipment', 'equipment', true],
+                ['Vehicle', 'vehicle'],
+                ['Insurance & Registration', 'documents'],
               ] as const).map(([title, group]) => (
                 <div key={group} className="space-y-1">
                   <h3 className="font-medium text-gray-800">{title}</h3>
                   <ul className="divide-y divide-gray-100">
-                    {PHOTO_ITEMS.filter((d) => d.group === group && d.required).map((d) => (
+                    {PHOTO_ITEMS.filter((d) => d.group === group).map((d) => (
                       <ProfileItemRow
                         key={d.id}
                         def={d}
@@ -713,16 +735,27 @@ export default function DriverOnboardingPage() {
               ))}
 
               <div className="space-y-1">
-                <h3 className="font-medium text-gray-800">Extras that get you more jobs</h3>
-                <p className="text-xs text-gray-500">Optional. Add these if you have them; dispatch uses them to match jobs.</p>
+                <h3 className="font-medium text-gray-800">Gear you own (optional)</h3>
+                <p className="text-xs text-gray-500">
+                  Check what you own so dispatch can match you to jobs that need it. A photo helps but is not needed.
+                  Each job offer lists any gear that job needs, and you can decline any job.
+                </p>
                 <ul className="divide-y divide-gray-100">
-                  {PHOTO_ITEMS.filter((d) => !d.required).map((d) => (
+                  {PHOTO_ITEMS.filter((d) => d.group === 'equipment').map((d) => (
                     <ProfileItemRow
                       key={d.id}
                       def={d}
-                      state={itemPaths[d.id as ProfileItemId] ? 'pending' : 'missing'}
+                      state={
+                        itemPaths[d.id as ProfileItemId]
+                          ? 'pending'
+                          : gearOwned[d.id as ProfileItemId]
+                          ? 'declared'
+                          : 'missing'
+                      }
                       thumbUrl={itemPreviews[d.id as ProfileItemId] ?? null}
                       onFile={uploadItem(d)}
+                      owned={!!gearOwned[d.id as ProfileItemId]}
+                      onOwnedChange={(v) => setGearOwned((prev) => ({ ...prev, [d.id]: v }))}
                     />
                   ))}
                 </ul>
@@ -731,6 +764,7 @@ export default function DriverOnboardingPage() {
               <div className="bg-amber-50 rounded-lg p-4">
                 <p className="text-sm text-amber-800">
                   Items marked Required are needed to finish your application. Dispatch reviews each photo.
+                  You can add your ID badge photo after you are approved.
                 </p>
               </div>
 
@@ -805,8 +839,8 @@ export default function DriverOnboardingPage() {
                       { id: 'license_back', label: 'License back', done: !!formData.license_back_url, required: false },
                       ...PHOTO_ITEMS.map((d) => ({
                         id: d.id,
-                        label: d.label,
-                        done: !!itemPaths[d.id as ProfileItemId],
+                        label: d.group === 'equipment' ? `${d.label} (owned)` : d.label,
+                        done: d.group === 'equipment' ? !!gearOwned[d.id as ProfileItemId] : !!itemPaths[d.id as ProfileItemId],
                         required: d.required,
                       })),
                     ].map((row) => (
@@ -818,7 +852,7 @@ export default function DriverOnboardingPage() {
                         )}
                         <span className={row.done ? 'text-gray-700' : 'text-gray-400'}>
                           {row.label}
-                          {!row.required && !row.id.startsWith('license') ? ' (extra)' : ''}
+                          {!row.required && !row.id.startsWith('license') ? ' (optional)' : ''}
                         </span>
                       </li>
                     ))}

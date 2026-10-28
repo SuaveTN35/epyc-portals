@@ -23,7 +23,7 @@ import {
 } from 'lucide-react';
 import { formatCurrency } from '@epyc/shared/utils';
 import { loadDriverReadiness, type DriverReadiness } from '@/lib/driver-readiness';
-import { DriverExtrasIcons, DriverReadinessBadges } from '@/components/dispatch/DriverReadinessBadges';
+import { DriverGearIcons, DriverReadinessBadges } from '@/components/dispatch/DriverReadinessBadges';
 
 interface Driver {
   id: string;
@@ -428,11 +428,11 @@ export default function DriversPage() {
                 )}
               </div>
 
-              {/* P-366: insurance, registration, and missing REQUIRED items; extras */}
+              {/* P-366: insurance, registration, and missing REQUIRED items (never gear); declared gear */}
               {readiness[driver.id] && (
                 <div className="space-y-2 mb-4">
                   <DriverReadinessBadges badges={readiness[driver.id].badges} />
-                  <DriverExtrasIcons extras={readiness[driver.id].extras} />
+                  <DriverGearIcons gear={readiness[driver.id].gear} />
                 </div>
               )}
 

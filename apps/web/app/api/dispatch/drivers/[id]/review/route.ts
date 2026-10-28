@@ -6,13 +6,17 @@ import { dimensionsComplete, parseReviewDecision } from '@/lib/driver-profile';
 
 /**
  * POST /api/dispatch/drivers/:id/review
- *   body: { item, decision: 'approve' | 'reject', reason?, photo_path? }
+ *   body: { item, decision: 'approve' | 'reject', reason?, photo_path?, uploaded_at }
  *
  * Staff only (admin / dispatcher). Approves or rejects one checklist item.
  * The file approved is always the one currently on record (drivers column for
  * vehicle/document items, the review row for equipment). If the browser sent
  * the photo_path it was showing and the driver has since uploaded a new one,
  * the route answers 409 so dispatch never approves a photo it did not see.
+ * The same applies to the review version (driver_review_items.uploaded_at,
+ * bumped on every driver write, e.g. a new insurance expiry or limits): if it
+ * differs from the version the page showed, 409 (QA N2). Gear the driver no
+ * longer lists (owned = false) cannot be approved.
  * Approving the insurance card is what lets an insured driver get new offers.
  */
 export async function POST(
@@ -30,7 +34,7 @@ export async function POST(
   }
   const parsed = parseReviewDecision(body);
   if (!parsed.ok) return NextResponse.json({ error: parsed.error }, { status: 400 });
-  const { item, decision, reason, photo_path: seenPath } = parsed.value;
+  const { item, decision, reason, photo_path: seenPath, uploaded_at: seenVersion } = parsed.value;
 
   const caller = await getCallerStaff();
   if (!caller) return NextResponse.json({ error: 'Not authorized' }, { status: 403 });
@@ -49,10 +53,21 @@ export async function POST(
   const def = getProfileItem(item)!;
   const { data: existing } = await admin
     .from('driver_review_items')
-    .select('photo_path')
+    .select('photo_path, uploaded_at, owned')
     .eq('driver_id', driverId)
     .eq('item', item)
     .maybeSingle();
+
+  const currentVersion = (existing?.uploaded_at as string | null | undefined) ?? null;
+  if (!sameVersion(seenVersion, currentVersion)) {
+    return NextResponse.json(
+      { error: 'The driver changed this item after you opened the page. Reload and review it again.' },
+      { status: 409 }
+    );
+  }
+  if (existing && existing.owned === false) {
+    return NextResponse.json({ error: 'The driver no longer lists this item' }, { status: 409 });
+  }
 
   let currentPath: string | null;
   if (def.kind === 'data') {
@@ -92,4 +107,13 @@ export async function POST(
     return NextResponse.json({ error: 'Could not save the review' }, { status: 500 });
   }
   return NextResponse.json({ ok: true, review: saved });
+}
+
+/**
+ * Same review version? Both values come from PostgREST's own rendering of
+ * driver_review_items.uploaded_at (the panel reads it, then sends it back),
+ * so an exact match is the safe test; any change means the driver wrote again.
+ */
+function sameVersion(seen: string | null, current: string | null): boolean {
+  return seen === current;
 }

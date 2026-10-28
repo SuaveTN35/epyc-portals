@@ -3,6 +3,7 @@ import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-lim
 import { getCallerDriver } from '@/lib/server/driver-session';
 import { packageSummary, type DriverOfferPayload } from '@/lib/job-offers';
 import { loadOfferBlockReason } from '@/lib/server/driver-eligibility';
+import { gearLabels } from '@/lib/driver-profile';
 
 /**
  * GET /api/driver/offers - the caller's open job offers.
@@ -44,7 +45,8 @@ export async function GET(request: NextRequest) {
          status, driver_id, pickup_city, pickup_state, delivery_city, delivery_state,
          pickup_window_start, pickup_window_end, delivery_window_start, delivery_window_end,
          distance_miles, estimated_duration_minutes, package_description, package_weight,
-         vehicle_required, service_level, requires_signature, requires_temperature_control
+         vehicle_required, service_level, requires_signature, requires_temperature_control,
+         required_equipment
        )`
     )
     .eq('driver_id', caller.driver.id)
@@ -83,6 +85,7 @@ export async function GET(request: NextRequest) {
       service_level: d.service_level ?? null,
       requires_signature: !!d.requires_signature,
       requires_temperature_control: !!d.requires_temperature_control,
+      required_equipment: gearLabels(d.required_equipment),
     }));
 
   return NextResponse.json({ offers });

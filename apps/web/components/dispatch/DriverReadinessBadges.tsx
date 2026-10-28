@@ -1,13 +1,17 @@
 'use client';
 
-import { Forklift, Layers, Snowflake, Package } from 'lucide-react';
-import type { DispatchBadge } from '@/lib/driver-profile';
-import type { ProfileItemDef } from '@/lib/driver-profile-items';
+import { Forklift, Layers, Snowflake, Package, Shirt, Glasses, Footprints, Hand, ShieldPlus } from 'lucide-react';
+import type { DeclaredGear, DispatchBadge } from '@/lib/driver-profile';
 
-const EXTRA_ICONS: Record<string, React.ElementType> = {
+export const GEAR_ICONS: Record<string, React.ElementType> = {
   hand_truck: Forklift,
   straps_blankets: Layers,
   cooler_temp_kit: Snowflake,
+  hi_vis_vest: Shirt,
+  safety_glasses: Glasses,
+  boots: Footprints,
+  gloves: Hand,
+  mask: ShieldPlus,
 };
 
 const TONE: Record<DispatchBadge['tone'], string> = {
@@ -30,21 +34,27 @@ export function DriverReadinessBadges({ badges }: { badges: DispatchBadge[] }) {
   );
 }
 
-/** Small icons for approved optional equipment, for picking the right driver. */
-export function DriverExtrasIcons({ extras }: { extras: ProfileItemDef[] }) {
-  if (extras.length === 0) return null;
+/**
+ * Small icons for the gear a driver lists as owned, for picking the right
+ * driver. Solid green = photo approved; outlined = declared, photo not
+ * approved yet. Informational only; gear never blocks a job.
+ */
+export function DriverGearIcons({ gear }: { gear: DeclaredGear[] }) {
+  if (gear.length === 0) return null;
   return (
-    <div className="flex items-center gap-1.5">
-      {extras.map((x) => {
-        const Icon = EXTRA_ICONS[x.id] ?? Package;
+    <div className="flex flex-wrap items-center gap-1.5">
+      {gear.map(({ def, approved }) => {
+        const Icon = GEAR_ICONS[def.id] ?? Package;
         return (
           <span
-            key={x.id}
-            title={x.label}
-            className="inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700"
+            key={def.id}
+            title={`${def.label}${approved ? ' (photo approved)' : ' (declared)'}`}
+            className={`inline-flex items-center gap-1 text-[11px] px-1.5 py-0.5 rounded ${
+              approved ? 'bg-emerald-50 text-emerald-700' : 'border border-gray-300 text-gray-600'
+            }`}
           >
             <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>{x.shortLabel || x.label}</span>
+            <span>{def.shortLabel || def.label}</span>
           </span>
         );
       })}

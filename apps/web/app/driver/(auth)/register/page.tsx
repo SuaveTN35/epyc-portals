@@ -111,13 +111,10 @@ function RegisterForm() {
       return;
     }
 
-    // Validate required files
-    if (!profilePhoto) {
-      setError('Profile photo is required');
-      setLoading(false);
-      return;
-    }
-
+    // Validate required files. A photo of the applicant is NOT required at
+    // application (2 CCR 11016(c)(2); TRIBUNAL P-367 R1): it is optional here,
+    // and the ID badge photo is collected after approval. No software ever
+    // compares it to the license or any other photo.
     if (!licenseFront) {
       setError("Driver's license front photo is required");
       setLoading(false);
@@ -134,8 +131,11 @@ function RegisterForm() {
 
     try {
       // Upload files first
-      setUploadProgress('Uploading profile photo...');
-      const profilePhotoUrl = await uploadFile(supabase, profilePhoto, 'profile-photos');
+      let profilePhotoUrl: string | null = null;
+      if (profilePhoto) {
+        setUploadProgress('Uploading photo...');
+        profilePhotoUrl = await uploadFile(supabase, profilePhoto, 'profile-photos');
+      }
 
       setUploadProgress("Uploading driver's license (front)...");
       const licenseFrontUrl = await uploadFile(supabase, licenseFront, 'license-front');
@@ -156,7 +156,7 @@ function RegisterForm() {
             full_name: formData.full_name,
             phone: formData.phone,
             role: 'driver',
-            profile_photo_url: profilePhotoUrl,
+            ...(profilePhotoUrl ? { profile_photo_url: profilePhotoUrl } : {}),
             drivers_license_front_url: licenseFrontUrl,
             drivers_license_back_url: licenseBackUrl,
             onboarding_status: 'documents_submitted',
@@ -299,7 +299,7 @@ function RegisterForm() {
         {/* Profile Photo Upload */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Profile Photo <span className="text-red-500">*</span>
+            Photo of you <span className="text-gray-500 font-normal">(optional)</span>
           </label>
           <div className="mt-1">
             {profilePhotoPreview ? (
@@ -336,7 +336,10 @@ function RegisterForm() {
               className="hidden"
               onChange={(e) => handleFileChange(e, setProfilePhoto, setProfilePhotoPreview)}
             />
-            <p className="text-xs text-gray-500 mt-2">Clear photo of your face. You can take one now with your camera.</p>
+            <p className="text-xs text-gray-500 mt-2">
+              Not required to apply, and not used to decide your application. You can skip this and add your ID badge
+              photo after you are approved.
+            </p>
           </div>
         </div>
 

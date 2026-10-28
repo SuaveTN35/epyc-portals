@@ -367,6 +367,15 @@ function JobCard({
           )}
         </div>
 
+        {offer.required_equipment && offer.required_equipment.length > 0 && (
+          <div className="text-sm mb-3 bg-amber-50 border border-amber-200 rounded-lg p-2">
+            <p className="font-medium text-amber-900">This job needs: {offer.required_equipment.join(', ')}</p>
+            <p className="text-xs text-amber-800 mt-0.5">
+              No gear for this one? Just decline. Declining never counts against you.
+            </p>
+          </div>
+        )}
+
         {offer.package_summary && (
           <p className="text-sm text-gray-600 mb-4 bg-gray-50 rounded-lg p-2">
             <Package className="h-4 w-4 inline mr-1 text-gray-400" />

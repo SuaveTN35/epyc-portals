@@ -10,6 +10,7 @@
 // - This form never sets is_hipaa or is_medical. Medical jobs with patient
 //   data are out of scope for manual entry.
 
+import { GEAR_IDS } from './driver-profile-items';
 import type { ServiceLevel, VehicleType } from '@epyc/shared';
 
 export const JOB_SOURCES = [
@@ -64,6 +65,8 @@ export interface NewJobForm {
   requires_signature: boolean;
   requires_photo_pod: boolean;
   loading_required: boolean;
+  /** P-366 / TRIBUNAL R12: gear this job needs (gear ids). Shown on the offer; never a block. */
+  required_equipment: string[];
 
   total_price: string;
   driver_payout: string;
@@ -98,6 +101,7 @@ export const EMPTY_NEW_JOB: NewJobForm = {
   requires_signature: true,
   requires_photo_pod: true,
   loading_required: false,
+  required_equipment: [],
   total_price: '',
   driver_payout: '',
 };
@@ -268,6 +272,7 @@ export function buildNewJobRow(
     requires_signature: form.requires_signature,
     requires_photo_pod: form.requires_photo_pod,
     loading_required: form.loading_required,
+    required_equipment: GEAR_IDS.filter((id) => form.required_equipment.includes(id)),
     is_hipaa: false,
     is_medical: false,
 

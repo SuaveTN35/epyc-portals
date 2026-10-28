@@ -38,7 +38,7 @@ export default async function ProfilePage() {
 
   const { data: reviewRows } = await supabase
     .from('driver_review_items')
-    .select('item, photo_path, status, reason, uploaded_at, reviewed_at')
+    .select('item, photo_path, status, reason, owned, uploaded_at, reviewed_at')
     .eq('driver_id', driver.id);
 
   const profile = driver.profiles;
