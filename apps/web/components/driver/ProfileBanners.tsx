@@ -4,10 +4,20 @@ import type { DriverWarning, ProfileGap } from '@/lib/driver-profile';
 
 /**
  * Insurance / registration warnings and the "complete your profile" list.
- * Shown at the top of every driver screen. Missing items never block work;
- * only the insurance rule does, and the red warning says so.
+ * Shown at the top of every driver screen. Insurance and the required
+ * vehicle and document items block new jobs (the red warning names what is
+ * missing); a few form details (insurance company, limits, registration
+ * date) do not, so the footer depends on `blocked`.
  */
-export function ProfileBanners({ warnings, gaps }: { warnings: DriverWarning[]; gaps: ProfileGap[] }) {
+export function ProfileBanners({
+  warnings,
+  gaps,
+  blocked,
+}: {
+  warnings: DriverWarning[];
+  gaps: ProfileGap[];
+  blocked: boolean;
+}) {
   if (warnings.length === 0 && gaps.length === 0) return null;
   return (
     <div className="space-y-3 mb-4">
@@ -36,7 +46,11 @@ export function ProfileBanners({ warnings, gaps }: { warnings: DriverWarning[]; 
               </li>
             ))}
           </ul>
-          <p className="mt-1 ml-7 text-xs">You can keep working while you finish these.</p>
+          <p className="mt-1 ml-7 text-xs">
+            {blocked
+              ? 'Upload these to start getting new job offers. Dispatch reviews what you send.'
+              : 'You can keep working while you finish these.'}
+          </p>
         </Link>
       )}
     </div>

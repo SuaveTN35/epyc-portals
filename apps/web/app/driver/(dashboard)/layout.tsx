@@ -5,7 +5,7 @@ import { redirect } from 'next/navigation';
 import { Search, Navigation, DollarSign, User, HelpCircle } from 'lucide-react';
 import { OfflineBanner } from '@/components/driver/OfflineBanner';
 import { ProfileBanners } from '@/components/driver/ProfileBanners';
-import { driverWarnings, pacificToday, profileGaps } from '@/lib/driver-profile';
+import { driverWarnings, newWorkBlockReason, pacificToday, profileGaps } from '@/lib/driver-profile';
 
 const navigation = [
   { name: 'Find Jobs', href: '/driver/jobs', icon: Search },
@@ -38,7 +38,8 @@ export default async function DriverDashboardLayout({
     redirect('/driver/onboarding');
   }
 
-  // P-366: insurance / registration warnings and missing REQUIRED items.
+  // P-366: insurance / registration warnings, missing REQUIRED items, and
+  // whether the new-work rule blocks this driver.
   const { data: reviewRows } = await supabase
     .from('driver_review_items')
     .select('item, photo_path, status, reason, owned')
@@ -46,6 +47,7 @@ export default async function DriverDashboardLayout({
   const today = pacificToday();
   const warnings = driverWarnings(driver, reviewRows || [], today);
   const gaps = profileGaps(driver, reviewRows || []);
+  const blocked = !!newWorkBlockReason(driver, reviewRows || [], today);
 
   return (
     <div className="min-h-screen bg-gray-100 pb-20">
@@ -73,7 +75,7 @@ export default async function DriverDashboardLayout({
 
       {/* Main Content */}
       <main className="p-4">
-        <ProfileBanners warnings={warnings} gaps={gaps} />
+        <ProfileBanners warnings={warnings} gaps={gaps} blocked={blocked} />
         {children}
       </main>
 

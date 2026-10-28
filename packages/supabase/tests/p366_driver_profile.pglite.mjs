@@ -8,9 +8,10 @@
 // driver cannot approve own items, staff can; path rules; vehicle identity
 // lock; re-review queueing; the insurance block on offers / accept / assign;
 // gear declared with optional photo (R12); ID badge photo only after
-// approval (R1); deliveries.required_equipment; privileges (QA N3); and the
+// approval (R1); deliveries.required_equipment; privileges (QA N3); the
 // interaction with the live Phase 0 / Phase 1 drivers guard (AEQUALIS QA
-// reproduction, folded in 2026-10-28).
+// reproduction, folded in 2026-10-28); and 20261028000600 (required items
+// block new work, Commander ruling 2026-10-28).
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -426,6 +427,69 @@ ok('N2: a driver insurance edit bumps the review version (uploaded_at)', new Dat
 await commitAs('service_role', null, `update driver_review_items set status = 'approved' where driver_id = '${D1}' and item = 'insurance_card'`);
 const staffAfter = (await db.query(`select uploaded_at from driver_review_items where driver_id = '${D1}' and item = 'insurance_card'`)).rows[0].uploaded_at;
 ok('N2: a staff review does not change the version', new Date(staffAfter).getTime() === new Date(after).getTime(), `${after} -> ${staffAfter}`);
+
+// ================= Required items block new work (0600, ruling 2026-10-28) =================
+await db.exec(mig('20261028000600_p366_required_items_block.sql'));
+await db.exec(mig('20261028000600_p366_required_items_block.sql'));
+ok('0600 applies twice without error', true);
+
+const P6 = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+await db.exec(`insert into profiles values ('${P6}', 'driver')`);
+r = await commitAs('service_role', null, `insert into drivers (profile_id, status, vehicle_type, insurance_expiry, insurance_card_url, registration_url,
+    vehicle_photo_front_url, vehicle_photo_back_url, vehicle_photo_side_url, vehicle_photo_cargo_url,
+    cargo_length_in, cargo_width_in, cargo_height_in, cargo_capacity_lbs)
+  values ('${P6}', 'active', 'van', current_date + 100, 'drivers/${P6}/ins.jpg', 'drivers/${P6}/reg.jpg',
+    'drivers/${P6}/f.jpg', 'drivers/${P6}/b.jpg', 'drivers/${P6}/s.jpg', 'drivers/${P6}/c.jpg', 120, 60, 50, 2000) returning id`);
+const D6 = r.rows?.[0]?.id;
+await commitAs('service_role', null, `insert into driver_review_items (driver_id, item, photo_path, status) values ('${D6}', 'insurance_card', 'drivers/${P6}/ins.jpg', 'approved')`);
+ok('A: fully uploaded driver with approved insurance is not blocked (others unreviewed)', (await reason(D6)) === null, await reason(D6));
+
+await db.exec(`update drivers set vehicle_photo_cargo_url = null where id = '${D6}'`);
+ok('A: missing photo blocks', (await reason(D6)) === 'Missing required items: Cargo area', await reason(D6));
+await db.exec(`update drivers set vehicle_photo_front_url = null, cargo_height_in = null, registration_url = null where id = '${D6}'`);
+ok('A: missing items listed in config order',
+  (await reason(D6)) === 'Missing required items: Vehicle - front, Cargo area, Cargo size and capacity, Vehicle registration', await reason(D6));
+r = await as('service_role', null, `insert into job_offers (delivery_id, driver_id, expires_at) values ('${DEL}', '${D6}', now() + interval '15 minutes') returning id`);
+ok('A: offer to a driver missing required items refused (service role)', r.error && r.error.code === '42501' && /Missing required items/.test(r.error.message), r.error?.message || 'inserted');
+await db.exec(`update drivers set vehicle_photo_front_url = 'drivers/${P6}/f.jpg', vehicle_photo_cargo_url = 'drivers/${P6}/c.jpg',
+  cargo_height_in = 50, registration_url = 'drivers/${P6}/reg.jpg' where id = '${D6}'`);
+ok('A: all back on file unblocks', (await reason(D6)) === null, await reason(D6));
+
+await db.exec(`update drivers set cargo_capacity_lbs = null where id = '${D6}'`);
+ok('A: incomplete dimensions block', (await reason(D6)) === 'Missing required items: Cargo size and capacity', await reason(D6));
+await db.exec(`update drivers set cargo_capacity_lbs = 2000 where id = '${D6}'`);
+
+await commitAs('service_role', null, `insert into driver_review_items (driver_id, item, photo_path, status, reason) values ('${D6}', 'vehicle_side', 'drivers/${P6}/s.jpg', 'rejected', 'Too dark')`);
+ok('A: rejected current file blocks', (await reason(D6)) === 'Rejected items need a new upload: Vehicle - side', await reason(D6));
+r = await commitAs('authenticated', P6, `update drivers set vehicle_photo_side_url = 'drivers/${P6}/s2.jpg' where id = '${D6}' returning id`);
+row = (await db.query(`select status, photo_path from driver_review_items where driver_id = '${D6}' and item = 'vehicle_side'`)).rows[0];
+ok('A: re-upload resets the rejected row to pending', row.status === 'pending' && row.photo_path === `drivers/${P6}/s2.jpg`, JSON.stringify(row) + (r.error?.message || ''));
+ok('A: re-uploaded (pending) item does not block', (await reason(D6)) === null, await reason(D6));
+
+await commitAs('service_role', null, `insert into driver_review_items (driver_id, item, photo_path, status, reason) values ('${D6}', 'vehicle_back', 'drivers/${P6}/old-b.jpg', 'rejected', 'x')`);
+ok('A: a rejection of an older file does not block', (await reason(D6)) === null, await reason(D6));
+await commitAs('service_role', null, `insert into driver_review_items (driver_id, item, photo_path, status, reason) values ('${D6}', 'cargo_dimensions', null, 'rejected', 'Wrong')`);
+ok('A: rejected dimensions block', (await reason(D6)) === 'Rejected items need a new upload: Cargo size and capacity', await reason(D6));
+await db.exec(`update drivers set vehicle_photo_front_url = null where id = '${D6}'`);
+ok('A: missing beats rejected', (await reason(D6)) === 'Missing required items: Vehicle - front', await reason(D6));
+await db.exec(`update drivers set vehicle_photo_front_url = 'drivers/${P6}/f.jpg' where id = '${D6}'`);
+await commitAs('service_role', null, `update driver_review_items set status = 'pending', reason = null where driver_id = '${D6}' and item = 'cargo_dimensions'`);
+ok('A: pending dimensions do not block', (await reason(D6)) === null, await reason(D6));
+
+await db.exec(`update drivers set registration_expiry = current_date - 10 where id = '${D6}'`);
+ok('A: expired registration does not block', (await reason(D6)) === null, await reason(D6));
+await commitAs('service_role', null, `insert into driver_review_items (driver_id, item, photo_path, status, reason, owned)
+  values ('${D6}', 'hand_truck', 'drivers/${P6}/ht.jpg', 'rejected', 'Blurry', true)`);
+ok('A: rejected gear never blocks', (await reason(D6)) === null, await reason(D6));
+
+await db.exec(`update drivers set insurance_card_url = null, vehicle_photo_front_url = null where id = '${D6}'`);
+ok('A: insurance reason still comes first', (await reason(D6)) === 'No insurance card on file', await reason(D6));
+await db.exec(`update drivers set insurance_card_url = 'drivers/${P6}/ins.jpg', vehicle_photo_front_url = 'drivers/${P6}/f.jpg' where id = '${D6}'`);
+await db.exec(`update drivers set insurance_expiry = current_date - 3 where id = '${D6}'`);
+ok('A: expired insurance still reported first', /^Insurance expired on /.test(await reason(D6) || ''), await reason(D6));
+await db.exec(`update drivers set insurance_expiry = current_date + 100 where id = '${D6}'`);
+r = await as('authenticated', P6, `select public.driver_offer_block_reason('${D6}')`);
+ok('A: drivers still cannot call the function directly', !!r.error);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

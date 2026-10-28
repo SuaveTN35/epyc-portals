@@ -1,4 +1,4 @@
-// Dispatch-side loader: insurance block, badges, and declared gear for a
+// Dispatch-side loader: new-work block (insurance, required items), badges, and declared gear for a
 // set of drivers (P-366). Takes any Supabase client (dispatch browser client
 // under staff RLS). The database enforces the insurance block regardless;
 // this is what lets the offer and assign pickers explain and skip.
@@ -9,7 +9,7 @@ import {
   gearMatch,
   type DeclaredGear,
   type GearMatch,
-  offerBlockReason,
+  newWorkBlockReason,
   pacificToday,
   type DispatchBadge,
   type DriverProfileFields,
@@ -34,9 +34,8 @@ export function readinessFor(
   today: string,
   neededGear: readonly string[] = []
 ): DriverReadiness {
-  const insurance = rows.find((r) => r.item === 'insurance_card') ?? null;
   return {
-    blockReason: offerBlockReason(driver, insurance, today),
+    blockReason: newWorkBlockReason(driver, rows, today),
     badges: dispatchBadges(driver, rows, today),
     gear: declaredGear(rows),
     match: gearMatch(rows, neededGear),

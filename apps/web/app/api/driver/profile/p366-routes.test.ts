@@ -365,18 +365,37 @@ describe('POST /api/dispatch/drivers/:id/review', () => {
   });
 });
 
-describe('POST /api/driver/offers/:id/respond (insurance block)', () => {
+// Every required vehicle / document item on file (ruling 2026-10-28).
+const UPLOADED = {
+  vehicle_photo_front_url: 'f.jpg',
+  vehicle_photo_back_url: 'b.jpg',
+  vehicle_photo_side_url: 's.jpg',
+  vehicle_photo_cargo_url: 'c2.jpg',
+  cargo_length_in: 100,
+  cargo_width_in: 50,
+  cargo_height_in: 40,
+  cargo_capacity_lbs: 1000,
+  registration_url: 'r.jpg',
+};
+
+describe('POST /api/driver/offers/:id/respond (new-work block)', () => {
   const future = new Date(Date.now() + 10 * 60_000).toISOString();
   const today = pacificToday();
-  function setup(insurance: { insurance_card_url: string | null; insurance_expiry: string | null }, reviewRow: unknown) {
+  function setup(
+    insurance: { insurance_card_url: string | null; insurance_expiry: string | null },
+    reviewRow: Record<string, unknown> | null,
+    extra: Record<string, unknown> = UPLOADED
+  ) {
     state.callerDriver = { id: 'drv-1', status: 'active', current_delivery_id: null };
     state.adminHandler = (t, ops, term) => {
       if (t === 'job_offers' && term === 'maybeSingle') {
         return { data: { id: 'off-1', delivery_id: 'del-1', driver_id: 'drv-1', status: 'pending', expires_at: future }, error: null };
       }
       if (t === 'deliveries' && term === 'maybeSingle') return { data: { id: 'del-1', status: 'booked', driver_id: null }, error: null };
-      if (t === 'drivers' && term === 'maybeSingle') return { data: insurance, error: null };
-      if (t === 'driver_review_items' && term === 'maybeSingle') return { data: reviewRow, error: null };
+      if (t === 'drivers' && term === 'maybeSingle') return { data: { ...extra, ...insurance }, error: null };
+      if (t === 'driver_review_items' && term === 'await') {
+        return { data: reviewRow ? [{ item: 'insurance_card', ...reviewRow }] : [], error: null };
+      }
       if (t === 'deliveries' && ops.some((o) => o[0] === 'update')) return { data: [{ id: 'del-1' }], error: null };
       return { data: null, error: null };
     };
@@ -398,6 +417,16 @@ describe('POST /api/driver/offers/:id/respond (insurance block)', () => {
     expect(res.status).toBe(403);
   });
 
+  it('refuses accept when a required item is missing, naming it', async () => {
+    const { vehicle_photo_cargo_url: _omit, ...withoutCargo } = UPLOADED;
+    void _omit;
+    setup({ insurance_card_url: 'c.jpg', insurance_expiry: '2099-01-01' }, { status: 'approved', photo_path: 'c.jpg' }, withoutCargo);
+    const res = await respond(jsonReq('/x', { action: 'accept' }), ctx('off-1'));
+    expect(res.status).toBe(403);
+    expect((await res.json()).blocked_reason).toBe('Missing required items: Cargo area');
+    expect(opsOf(state.adminLog, 'deliveries', 'update')).toEqual([]);
+  });
+
   it('still lets a blocked driver decline', async () => {
     setup({ insurance_card_url: null, insurance_expiry: null }, null);
     const res = await respond(jsonReq('/x', { action: 'decline' }), ctx('off-1'));
@@ -417,8 +446,12 @@ describe('GET /api/driver/offers (gear shown before accept)', () => {
     state.callerDriver = { id: 'drv-1', status: 'active', current_delivery_id: null };
     const future = new Date(Date.now() + 10 * 60_000).toISOString();
     state.adminHandler = (t, _ops, term) => {
-      if (t === 'drivers' && term === 'maybeSingle') return { data: { insurance_card_url: 'c.jpg', insurance_expiry: '2099-01-01' }, error: null };
-      if (t === 'driver_review_items' && term === 'maybeSingle') return { data: { status: 'approved', photo_path: 'c.jpg' }, error: null };
+      if (t === 'drivers' && term === 'maybeSingle') {
+        return { data: { ...UPLOADED, insurance_card_url: 'c.jpg', insurance_expiry: '2099-01-01' }, error: null };
+      }
+      if (t === 'driver_review_items' && term === 'await') {
+        return { data: [{ item: 'insurance_card', status: 'approved', photo_path: 'c.jpg' }], error: null };
+      }
       if (t === 'job_offers') {
         return {
           data: [{

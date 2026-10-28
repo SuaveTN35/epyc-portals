@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Your driver account is not active' }, { status: 403 });
   }
 
-  // P-366: no new offers while insurance is expired or not approved. Offers
+  // P-366: no new offers while insurance is expired or not approved, or a
+  // required item is missing or rejected. Offers
   // already sent stay hidden (accept would be refused anyway); the screen
   // shows why. Jobs already assigned are unaffected.
   const blockedReason = await loadOfferBlockReason(caller.admin, caller.driver.id);

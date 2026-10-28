@@ -2,23 +2,22 @@
 // Same rule as driver_offer_block_reason() in the database, which also
 // enforces it on job_offers and deliveries; this gives a clear message first.
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { offerBlockReason, pacificToday } from '@/lib/driver-profile';
+import { newWorkBlockReason, pacificToday, type DriverProfileFields, type ReviewRow } from '@/lib/driver-profile';
+import { READINESS_DRIVER_COLUMNS } from '@/lib/driver-readiness';
 
 export async function loadOfferBlockReason(admin: SupabaseClient, driverId: string): Promise<string | null> {
-  const [{ data: driver }, { data: review }] = await Promise.all([
-    admin.from('drivers').select('insurance_card_url, insurance_expiry').eq('id', driverId).maybeSingle(),
+  const [{ data: driver }, { data: rows }] = await Promise.all([
+    admin.from('drivers').select(READINESS_DRIVER_COLUMNS).eq('id', driverId).maybeSingle(),
     admin
       .from('driver_review_items')
-      .select('status, photo_path')
-      .eq('driver_id', driverId)
-      .eq('item', 'insurance_card')
-      .maybeSingle(),
+      .select('item, photo_path, status, reason, owned')
+      .eq('driver_id', driverId),
   ]);
   if (!driver) return 'Driver not found';
-  return offerBlockReason(driver, review ?? null, pacificToday());
+  return newWorkBlockReason(driver as unknown as DriverProfileFields, (rows as ReviewRow[]) || [], pacificToday());
 }
 
-/** Message shown to a driver whose accept is refused for insurance. */
+/** Message shown to a driver whose accept is refused by the new-work rule. */
 export function blockedAcceptMessage(reason: string): string {
-  return `You can't take new jobs right now: ${reason}. Update your insurance on your Profile; dispatch must approve it.`;
+  return `You can't take new jobs right now: ${reason}. Fix it on your Profile; dispatch reviews what you upload.`;
 }

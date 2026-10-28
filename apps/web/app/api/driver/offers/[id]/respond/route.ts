@@ -103,8 +103,8 @@ export async function POST(
 
   if (assignError) {
     if (assignError.code === '42501') {
-      // guard_new_work_insurance refused it (insurance changed in the meantime).
-      return NextResponse.json({ error: blockedAcceptMessage('insurance is not current or not approved') }, { status: 403 });
+      // guard_new_work_insurance refused it (insurance or required items changed in the meantime).
+      return NextResponse.json({ error: blockedAcceptMessage('insurance or required items are not in order') }, { status: 403 });
     }
     return NextResponse.json({ error: `Could not accept: ${assignError.message}` }, { status: 500 });
   }

@@ -1,8 +1,8 @@
 // ONE source of truth for the driver profile checklist (P-366).
 //
 // To make an item required or optional, flip `required` on its line below.
-// No migration is needed: the database accepts every id in this list
-// regardless of the flag (driver_review_items_item_check in
+// For gear and the badge photo no migration is needed: the database accepts
+// every id in this list regardless of the flag (driver_review_items_item_check in
 // packages/supabase/migrations/20261028000500_p366_driver_profile.sql).
 // Adding a NEW id does need that CHECK constraint extended.
 //
@@ -11,8 +11,14 @@
 // required: false -> a plus ("Extras that get you more jobs"); never blocks
 //                    anything; approved extras show to dispatch for matching.
 //
-// Nothing here blocks job offers. Only insurance does (see offerBlockReason
-// in lib/driver-profile.ts and driver_offer_block_reason() in the database).
+// NEW WORK (Commander ruling 2026-10-28, "until uploaded"): a driver gets no
+// new job offers while insurance is not current and approved, OR while a
+// required vehicle / document item is missing or rejected (pending is fine).
+// See newWorkBlockReason in lib/driver-profile.ts and
+// driver_offer_block_reason() in the database (migration 20261028000600).
+// The database holds its own copy of the required list: flipping `required`
+// on a vehicle or document item here needs that SQL list changed too (a
+// unit test fails until NEW_WORK_REQUIRED_ITEM_IDS matches it).
 //
 // GEAR (group 'equipment') IS DECLARED, NEVER REQUIRED. Commander ruling
 // 2026-10-28 on TRIBUNAL P-367 R12 (AB 5 control-factor risk): the driver

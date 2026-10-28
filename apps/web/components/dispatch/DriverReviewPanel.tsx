@@ -7,7 +7,7 @@ import {
   checklist,
   expiryState,
   formatLimits,
-  offerBlockReason,
+  newWorkBlockReason,
   pacificToday,
   profileGaps,
   type DriverProfileFields,
@@ -75,7 +75,7 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
   const items = useMemo(() => checklist(driver, rows), [driver, rows]);
   const gaps = useMemo(() => profileGaps(driver, rows), [driver, rows]);
   const block = useMemo(
-    () => offerBlockReason(driver, rows.find((r) => r.item === 'insurance_card') ?? null, pacificToday()),
+    () => newWorkBlockReason(driver, rows, pacificToday()),
     [driver, rows]
   );
 
@@ -239,7 +239,7 @@ export function DriverReviewPanel({ driver }: { driver: ReviewPanelDriver }) {
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
       <h2 className="text-lg font-semibold text-gray-900 mb-1">Documents &amp; vehicle</h2>
       <p className={`text-sm mb-4 ${block ? 'text-red-700' : 'text-green-700'}`}>
-        {block ? `No new jobs: ${block}` : 'Insurance approved and current: can get new jobs'}
+        {block ? `No new jobs: ${block}` : 'Insurance approved and required items uploaded: can get new jobs'}
       </p>
 
       {error && (

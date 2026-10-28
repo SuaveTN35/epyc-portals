@@ -1,9 +1,9 @@
 // Driver profile rules (P-366): insurance eligibility, expiry warnings,
 // checklist state, profile gaps, dispatch badges, and input validation.
 // Pure functions only (no Supabase, no React) so they are unit tested in
-// driver-profile.test.ts. The database enforces the same insurance rule in
-// driver_offer_block_reason() (migration 20261028000500); keep the reason
-// strings and their order in step with it.
+// driver-profile.test.ts. The database enforces the same new-work rule in
+// driver_offer_block_reason() (migrations 20261028000500 and 0600); keep the
+// reason strings and their order in step with it.
 
 import {
   PROFILE_ITEMS,
@@ -102,7 +102,7 @@ export function expiryState(date: string | null | undefined, today: string): Exp
 }
 
 // ---------------------------------------------------------------------------
-// Insurance eligibility (the only rule that blocks new work)
+// New-work eligibility: insurance, then required items
 // ---------------------------------------------------------------------------
 
 /**
@@ -126,6 +126,57 @@ export function offerBlockReason(
   if (insuranceReview.status === 'pending') return 'Insurance card is waiting for dispatch review';
   if (insuranceReview.status === 'rejected') return 'Insurance card was rejected by dispatch';
   return null;
+}
+
+/**
+ * Required vehicle and document items (besides insurance) that block new
+ * work while missing or rejected (Commander ruling 2026-10-28, "until
+ * uploaded"). Must equal the list in driver_offer_block_reason()
+ * (migration 20261028000600); driver-profile.test.ts pins it.
+ */
+export const NEW_WORK_REQUIRED_ITEM_IDS: readonly ProfileItemId[] = (PROFILE_ITEMS as readonly ProfileItemDef[])
+  .filter((d) => d.required && (d.group === 'vehicle' || d.group === 'documents') && d.id !== 'insurance_card')
+  .map((d) => d.id as ProfileItemId);
+
+/**
+ * Null when every required item is uploaded and none is rejected. Pending
+ * or unreviewed items do not block; registration expiry does not block.
+ */
+export function requiredItemsBlockReason(
+  driver: DriverProfileFields,
+  reviewRows: ReviewRow[] | null | undefined
+): string | null {
+  const reviews = indexReviews(reviewRows);
+  const missing: string[] = [];
+  const rejected: string[] = [];
+  for (const id of NEW_WORK_REQUIRED_ITEM_IDS) {
+    const def = getProfileItem(id)!;
+    const row = reviews[id];
+    if (def.kind === 'data') {
+      if (!dimensionsComplete(driver)) missing.push(def.label);
+      else if (row?.status === 'rejected') rejected.push(def.label);
+      continue;
+    }
+    const file = def.column ? driver[def.column] ?? null : null;
+    if (!file) missing.push(def.label);
+    else if (row?.status === 'rejected' && row.photo_path === file) rejected.push(def.label);
+  }
+  if (missing.length > 0) return `Missing required items: ${missing.join(', ')}`;
+  if (rejected.length > 0) return `Rejected items need a new upload: ${rejected.join(', ')}`;
+  return null;
+}
+
+/**
+ * Null when the driver may get new job offers. Insurance first, then the
+ * required items. Same rule, strings, and order as driver_offer_block_reason().
+ */
+export function newWorkBlockReason(
+  driver: DriverProfileFields,
+  reviewRows: ReviewRow[] | null | undefined,
+  today: string
+): string | null {
+  const insurance = (reviewRows || []).find((r) => r.item === 'insurance_card') ?? null;
+  return offerBlockReason(driver, insurance, today) ?? requiredItemsBlockReason(driver, reviewRows);
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +423,8 @@ export function dispatchBadges(
   const block = offerBlockReason(driver, reviews['insurance_card'] ?? null, today);
   if (block && ins !== 'expired') {
     badges.push({ key: 'ins-blocked', label: 'No new jobs: insurance', tone: 'red' });
+  } else if (!block && requiredItemsBlockReason(driver, reviewRows)) {
+    badges.push({ key: 'items-blocked', label: 'No new jobs: required items', tone: 'red' });
   }
 
   const reg = expiryState(driver.registration_expiry, today);
@@ -404,9 +457,8 @@ export function driverWarnings(
   today: string
 ): DriverWarning[] {
   const out: DriverWarning[] = [];
-  const reviews = indexReviews(reviewRows);
   const ins = expiryState(driver.insurance_expiry, today);
-  const block = offerBlockReason(driver, reviews['insurance_card'] ?? null, today);
+  const block = newWorkBlockReason(driver, reviewRows, today);
 
   if (ins === 'expired') {
     out.push({ tone: 'red', text: 'Your insurance has expired. You will not get new job offers until you upload your current card and dispatch approves it.' });

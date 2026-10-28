@@ -3,6 +3,9 @@ import {
   pacificToday,
   expiryState,
   offerBlockReason,
+  newWorkBlockReason,
+  requiredItemsBlockReason,
+  NEW_WORK_REQUIRED_ITEM_IDS,
   checklist,
   profileGaps,
   dispatchBadges,
@@ -137,6 +140,78 @@ describe('offerBlockReason (insurance eligibility)', () => {
     ]) {
       expect(sql).toContain(`'${s}`);
     }
+  });
+});
+
+describe('newWorkBlockReason (insurance, then required items; ruling 2026-10-28)', () => {
+  const rows = approvedRows(fullDriver);
+  const sql = () =>
+    readFileSync(
+      join(__dirname, '../../../packages/supabase/migrations/20261028000600_p366_required_items_block.sql'),
+      'utf8'
+    );
+
+  it('pins the required list to the SQL function (config order, same labels)', () => {
+    expect(NEW_WORK_REQUIRED_ITEM_IDS).toEqual([
+      'vehicle_front',
+      'vehicle_back',
+      'vehicle_side',
+      'vehicle_cargo',
+      'cargo_dimensions',
+      'registration',
+    ]);
+    const text = sql();
+    const pairs = [...text.matchAll(/\(\d+, '([a-z_]+)', '([^']+)'\)/g)].map((m) => [m[1], m[2]]);
+    expect(pairs).toEqual(NEW_WORK_REQUIRED_ITEM_IDS.map((id) => [id, getProfileItem(id)!.label]));
+    expect(text).toContain("'Missing required items: '");
+    expect(text).toContain("'Rejected items need a new upload: '");
+  });
+  it('allows a fully uploaded, insurance-approved driver', () => {
+    expect(newWorkBlockReason(fullDriver, rows, TODAY)).toBeNull();
+  });
+  it('blocks on a missing photo and on incomplete dimensions, in config order', () => {
+    expect(newWorkBlockReason({ ...fullDriver, vehicle_photo_cargo_url: null }, rows, TODAY)).toBe(
+      'Missing required items: Cargo area'
+    );
+    expect(
+      newWorkBlockReason({ ...fullDriver, registration_url: null, cargo_height_in: null, vehicle_photo_front_url: null }, rows, TODAY)
+    ).toBe('Missing required items: Vehicle - front, Cargo size and capacity, Vehicle registration');
+  });
+  it('blocks on a rejected current file until it is re-uploaded', () => {
+    const rejected = rows.map((r) => (r.item === 'vehicle_side' ? { ...r, status: 'rejected', reason: 'Too dark' } : r));
+    expect(newWorkBlockReason(fullDriver, rejected, TODAY)).toBe('Rejected items need a new upload: Vehicle - side');
+    // Re-uploaded: the file on record no longer matches the rejected row.
+    expect(newWorkBlockReason({ ...fullDriver, vehicle_photo_side_url: `drivers/${P}/s2.jpg` }, rejected, TODAY)).toBeNull();
+    const dims = rows.map((r) => (r.item === 'cargo_dimensions' ? { ...r, status: 'rejected', reason: 'x' } : r));
+    expect(newWorkBlockReason(fullDriver, dims, TODAY)).toBe('Rejected items need a new upload: Cargo size and capacity');
+  });
+  it('missing beats rejected', () => {
+    const rejected = rows.map((r) => (r.item === 'vehicle_side' ? { ...r, status: 'rejected', reason: 'x' } : r));
+    expect(newWorkBlockReason({ ...fullDriver, vehicle_photo_back_url: null }, rejected, TODAY)).toBe(
+      'Missing required items: Vehicle - back'
+    );
+  });
+  it('pending or unreviewed items do not block; registration expiry does not block', () => {
+    const onlyIns = rows.filter((r) => r.item === 'insurance_card');
+    expect(newWorkBlockReason(fullDriver, onlyIns, TODAY)).toBeNull();
+    const pending = rows.map((r) => (r.item === 'registration' ? { ...r, status: 'pending' } : r));
+    expect(newWorkBlockReason(fullDriver, pending, TODAY)).toBeNull();
+    expect(newWorkBlockReason({ ...fullDriver, registration_expiry: '2026-01-01' }, rows, TODAY)).toBeNull();
+  });
+  it('gear never blocks', () => {
+    const gear = new Set(GEAR_ITEMS.map((g) => g.id as string));
+    const noGear = rows.filter((r) => !gear.has(r.item));
+    expect(newWorkBlockReason(fullDriver, noGear, TODAY)).toBeNull();
+    const rejectedGear = rows.map((r) => (gear.has(r.item) ? { ...r, status: 'rejected', reason: 'x' } : r));
+    expect(newWorkBlockReason(fullDriver, rejectedGear, TODAY)).toBeNull();
+  });
+  it('insurance reasons come first', () => {
+    expect(newWorkBlockReason({ ...fullDriver, insurance_card_url: null, vehicle_photo_front_url: null }, rows, TODAY)).toBe(
+      'No insurance card on file'
+    );
+    expect(requiredItemsBlockReason({ ...fullDriver, vehicle_photo_front_url: null }, rows)).toBe(
+      'Missing required items: Vehicle - front'
+    );
   });
 });
 
@@ -318,6 +393,12 @@ describe('dispatchBadges', () => {
     const rows = approvedRows(fullDriver).filter((r) => r.item !== 'insurance_card');
     expect(dispatchBadges(fullDriver, rows, TODAY).map((b) => b.label)).toEqual(['No new jobs: insurance']);
   });
+  it('flags a missing required item as no new jobs', () => {
+    const rows = approvedRows(fullDriver);
+    const labels = dispatchBadges({ ...fullDriver, vehicle_photo_cargo_url: null }, rows, TODAY).map((b) => b.label);
+    expect(labels).toContain('No new jobs: required items');
+    expect(labels).not.toContain('No new jobs: insurance');
+  });
 });
 
 describe('driverWarnings', () => {
@@ -329,6 +410,10 @@ describe('driverWarnings', () => {
     const reg = driverWarnings({ ...fullDriver, registration_expiry: '2026-10-31' }, rows, TODAY);
     expect(reg).toHaveLength(1);
     expect(reg[0].tone).toBe('amber'); // registration warns, never blocks
+  });
+  it('names missing required items in the red warning', () => {
+    const w = driverWarnings({ ...fullDriver, vehicle_photo_front_url: null }, approvedRows(fullDriver), TODAY);
+    expect(w[0]).toEqual({ tone: 'red', text: 'You will not get new job offers right now: Missing required items: Vehicle - front.' });
   });
 });
 
