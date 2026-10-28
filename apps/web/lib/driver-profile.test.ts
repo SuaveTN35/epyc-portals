@@ -1,0 +1,327 @@
+import { describe, it, expect } from 'vitest';
+import {
+  pacificToday,
+  expiryState,
+  offerBlockReason,
+  checklist,
+  profileGaps,
+  dispatchBadges,
+  driverHasEquipment,
+  approvedExtras,
+  driverWarnings,
+  validateDimensions,
+  validateInsuranceDetails,
+  validateRegistrationExpiry,
+  isOwnUploadPath,
+  buildUploadPath,
+  parseReviewDecision,
+  onboardingMissing,
+  isValidDateString,
+  type DriverProfileFields,
+  type ReviewRow,
+} from './driver-profile';
+import { PROFILE_ITEMS, REQUIRED_ITEMS, EXTRA_ITEMS, getProfileItem } from './driver-profile-items';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+const TODAY = '2026-11-01';
+const P = '33333333-3333-3333-3333-333333333333';
+const CARD = `drivers/${P}/insurance_card-1.jpg`;
+
+const fullDriver: DriverProfileFields = {
+  insurance_card_url: CARD,
+  insurance_expiry: '2027-05-01',
+  insurance_policy: 'POL1',
+  insurance_carrier: 'Acme Mutual',
+  insurance_bi_per_person: 30000,
+  insurance_bi_per_accident: 60000,
+  insurance_pd_limit: 15000,
+  insurance_business_use: true,
+  registration_url: `drivers/${P}/registration-1.jpg`,
+  registration_expiry: '2027-03-01',
+  vehicle_photo_front_url: `drivers/${P}/f.jpg`,
+  vehicle_photo_back_url: `drivers/${P}/b.jpg`,
+  vehicle_photo_side_url: `drivers/${P}/s.jpg`,
+  vehicle_photo_cargo_url: `drivers/${P}/c.jpg`,
+  cargo_length_in: 120,
+  cargo_width_in: 60,
+  cargo_height_in: 50,
+  cargo_capacity_lbs: 2000,
+};
+
+function approvedRows(d: DriverProfileFields, ids = PROFILE_ITEMS.map((i) => i.id) as string[]): ReviewRow[] {
+  return ids.map((id) => {
+    const def = getProfileItem(id)!;
+    const path = def.kind === 'data' ? null : def.column ? (d[def.column] as string) : `drivers/${P}/${id}.jpg`;
+    return { item: id, photo_path: path, status: 'approved', reason: null };
+  });
+}
+
+describe('pacificToday', () => {
+  it('uses the Pacific calendar date, not UTC', () => {
+    // 2026-11-02 05:00 UTC is still Nov 1 in Los Angeles.
+    expect(pacificToday(new Date('2026-11-02T05:00:00Z'))).toBe('2026-11-01');
+    expect(pacificToday(new Date('2026-11-02T09:00:00Z'))).toBe('2026-11-02');
+  });
+});
+
+describe('expiryState (14-day warning)', () => {
+  it('classifies dates', () => {
+    expect(expiryState(null, TODAY)).toBe('missing');
+    expect(expiryState('2026-10-31', TODAY)).toBe('expired');
+    expect(expiryState('2026-11-01', TODAY)).toBe('expiring'); // expires today: still covered
+    expect(expiryState('2026-11-15', TODAY)).toBe('expiring'); // exactly 14 days
+    expect(expiryState('2026-11-16', TODAY)).toBe('ok'); // 15 days
+    expect(expiryState('not-a-date', TODAY)).toBe('missing');
+  });
+});
+
+describe('offerBlockReason (insurance eligibility)', () => {
+  const approved = { status: 'approved', photo_path: CARD };
+  it('allows a current, approved card', () => {
+    expect(offerBlockReason(fullDriver, approved, TODAY)).toBeNull();
+  });
+  it('allows a card expiring within 14 days (warn only)', () => {
+    expect(offerBlockReason({ ...fullDriver, insurance_expiry: '2026-11-10' }, approved, TODAY)).toBeNull();
+  });
+  it('allows a card that expires today', () => {
+    expect(offerBlockReason({ ...fullDriver, insurance_expiry: TODAY }, approved, TODAY)).toBeNull();
+  });
+  it('blocks an expired card even if approved', () => {
+    expect(offerBlockReason({ ...fullDriver, insurance_expiry: '2026-10-31' }, approved, TODAY)).toBe(
+      'Insurance expired on 2026-10-31'
+    );
+  });
+  it('blocks a null expiry', () => {
+    expect(offerBlockReason({ ...fullDriver, insurance_expiry: null }, approved, TODAY)).toBe(
+      'No insurance expiry date on file'
+    );
+  });
+  it('blocks no card', () => {
+    expect(offerBlockReason({ ...fullDriver, insurance_card_url: null }, approved, TODAY)).toBe('No insurance card on file');
+  });
+  it('blocks pending, rejected, unreviewed, and stale approvals', () => {
+    expect(offerBlockReason(fullDriver, { status: 'pending', photo_path: CARD }, TODAY)).toBe(
+      'Insurance card is waiting for dispatch review'
+    );
+    expect(offerBlockReason(fullDriver, { status: 'rejected', photo_path: CARD }, TODAY)).toBe(
+      'Insurance card was rejected by dispatch'
+    );
+    expect(offerBlockReason(fullDriver, null, TODAY)).toBe('Insurance card has not been reviewed by dispatch');
+    expect(offerBlockReason(fullDriver, { status: 'approved', photo_path: 'insurance/old.jpg' }, TODAY)).toBe(
+      'Insurance card changed and needs dispatch review'
+    );
+  });
+  it('uses the same reason strings as the SQL function', () => {
+    const sql = readFileSync(
+      join(__dirname, '../../../packages/supabase/migrations/20261028000500_p366_driver_profile.sql'),
+      'utf8'
+    );
+    for (const s of [
+      'No insurance card on file',
+      'No insurance expiry date on file',
+      'Insurance expired on ',
+      'Insurance card has not been reviewed by dispatch',
+      'Insurance card changed and needs dispatch review',
+      'Insurance card is waiting for dispatch review',
+      'Insurance card was rejected by dispatch',
+    ]) {
+      expect(sql).toContain(`'${s}`);
+    }
+  });
+});
+
+describe('item config', () => {
+  it('has the Commander default required/plus split', () => {
+    expect(EXTRA_ITEMS.map((i) => i.id).sort()).toEqual(['cooler_temp_kit', 'hand_truck', 'straps_blankets']);
+    expect(REQUIRED_ITEMS.map((i) => i.id).sort()).toEqual(
+      [
+        'boots', 'cargo_dimensions', 'gloves', 'hi_vis_vest', 'insurance_card', 'mask', 'registration',
+        'safety_glasses', 'vehicle_back', 'vehicle_cargo', 'vehicle_front', 'vehicle_side',
+      ].sort()
+    );
+  });
+  it('every item id is allowed by the database CHECK, required or not', () => {
+    const sql = readFileSync(
+      join(__dirname, '../../../packages/supabase/migrations/20261028000500_p366_driver_profile.sql'),
+      'utf8'
+    );
+    const check = sql.slice(sql.indexOf('driver_review_items_item_check'), sql.indexOf('driver_review_items_status_check'));
+    for (const i of PROFILE_ITEMS) expect(check).toContain(`'${i.id}'`);
+  });
+});
+
+describe('checklist / equipment completeness', () => {
+  it('a fully approved driver is all approved with no gaps', () => {
+    const rows = approvedRows(fullDriver);
+    expect(checklist(fullDriver, rows).every((s) => s.state === 'approved')).toBe(true);
+    expect(profileGaps(fullDriver, rows)).toEqual([]);
+  });
+
+  it('missing plus items never create a gap or a badge', () => {
+    const rows = approvedRows(fullDriver, REQUIRED_ITEMS.map((i) => i.id));
+    expect(profileGaps(fullDriver, rows)).toEqual([]);
+    expect(dispatchBadges(fullDriver, rows, TODAY)).toEqual([]);
+    const extras = checklist(fullDriver, rows).filter((s) => !s.def.required);
+    expect(extras.every((s) => s.state === 'missing')).toBe(true);
+  });
+
+  it('a legacy driver with only old columns gets gaps per group (never a block on its own)', () => {
+    const legacy: DriverProfileFields = {
+      insurance_card_url: 'insurance/1.jpg',
+      insurance_expiry: '2027-01-01',
+      insurance_policy: 'P',
+      registration_url: 'registration/1.jpg',
+      vehicle_photo_front_url: 'vehicles/1.jpg',
+    };
+    const gaps = profileGaps(legacy, []);
+    const groups = gaps.map((g) => g.group);
+    expect(groups).toEqual(['insurance', 'registration', 'vehicle_photos', 'dimensions', 'equipment']);
+    expect(gaps.find((g) => g.group === 'equipment')!.missing).toHaveLength(5); // required equipment only
+    expect(gaps.find((g) => g.group === 'vehicle_photos')!.missing).toEqual([
+      'Vehicle - back', 'Vehicle - side', 'Cargo area',
+    ]);
+    // Files on record but never reviewed show as "unreviewed", not missing.
+    const states = Object.fromEntries(checklist(legacy, []).map((s) => [s.def.id, s.state]));
+    expect(states.insurance_card).toBe('unreviewed');
+    expect(states.vehicle_front).toBe('unreviewed');
+  });
+
+  it('rejected required items show as a redo gap; pending does not', () => {
+    const rows = approvedRows(fullDriver).map((r) =>
+      r.item === 'gloves' ? { ...r, status: 'rejected', reason: 'Blurry' } : r.item === 'boots' ? { ...r, status: 'pending' } : r
+    );
+    const gaps = profileGaps(fullDriver, rows);
+    expect(gaps).toEqual([{ group: 'equipment', label: 'Equipment', missing: ['Work gloves (redo)'] }]);
+    const gloves = checklist(fullDriver, rows).find((s) => s.def.id === 'gloves')!;
+    expect(gloves.reason).toBe('Blurry');
+  });
+
+  it('a retaken document whose file changed shows as pending', () => {
+    const rows = approvedRows(fullDriver);
+    const d = { ...fullDriver, registration_url: `drivers/${P}/registration-2.jpg` };
+    expect(checklist(d, rows).find((s) => s.def.id === 'registration')!.state).toBe('pending');
+  });
+
+  it('dimensions are missing until all four are entered', () => {
+    const d = { ...fullDriver, cargo_capacity_lbs: null };
+    expect(checklist(d, approvedRows(fullDriver)).find((s) => s.def.id === 'cargo_dimensions')!.state).toBe('missing');
+  });
+
+  it('driverHasEquipment / approvedExtras only count approved items', () => {
+    const rows: ReviewRow[] = [
+      { item: 'hand_truck', photo_path: 'x', status: 'approved', reason: null },
+      { item: 'cooler_temp_kit', photo_path: 'y', status: 'pending', reason: null },
+    ];
+    expect(driverHasEquipment(rows, 'hand_truck')).toBe(true);
+    expect(driverHasEquipment(rows, 'cooler_temp_kit')).toBe(false);
+    expect(driverHasEquipment(rows, 'straps_blankets')).toBe(false);
+    expect(approvedExtras(rows).map((d) => d.id)).toEqual(['hand_truck']);
+  });
+});
+
+describe('dispatchBadges', () => {
+  it('flags expired / expiring insurance and registration', () => {
+    const rows = approvedRows(fullDriver);
+    expect(dispatchBadges({ ...fullDriver, insurance_expiry: '2026-10-01' }, rows, TODAY).map((b) => b.label)).toEqual([
+      'Insurance expired',
+    ]);
+    expect(dispatchBadges({ ...fullDriver, insurance_expiry: '2026-11-05' }, rows, TODAY).map((b) => b.label)).toEqual([
+      'Insurance expiring',
+    ]);
+    expect(dispatchBadges({ ...fullDriver, registration_expiry: '2026-10-01' }, rows, TODAY).map((b) => b.label)).toEqual([
+      'Registration expired',
+    ]);
+  });
+  it('flags a current but unapproved card as no new jobs', () => {
+    const rows = approvedRows(fullDriver).filter((r) => r.item !== 'insurance_card');
+    expect(dispatchBadges(fullDriver, rows, TODAY).map((b) => b.label)).toEqual(['No new jobs: insurance']);
+  });
+});
+
+describe('driverWarnings', () => {
+  it('warns from 14 days out and explains a block', () => {
+    const rows = approvedRows(fullDriver);
+    expect(driverWarnings({ ...fullDriver, insurance_expiry: '2026-11-15' }, rows, TODAY)[0].text).toMatch(/in 14 days/);
+    expect(driverWarnings({ ...fullDriver, insurance_expiry: '2026-11-16' }, rows, TODAY)).toEqual([]);
+    expect(driverWarnings({ ...fullDriver, insurance_expiry: '2026-10-31' }, rows, TODAY)[0].tone).toBe('red');
+    const reg = driverWarnings({ ...fullDriver, registration_expiry: '2026-10-31' }, rows, TODAY);
+    expect(reg).toHaveLength(1);
+    expect(reg[0].tone).toBe('amber'); // registration warns, never blocks
+  });
+});
+
+describe('validation', () => {
+  it('dimensions: required, bounded, rounded', () => {
+    expect(validateDimensions({ cargo_length_in: '120', cargo_width_in: 60, cargo_height_in: 50.04, cargo_capacity_lbs: '2000.4' })).toEqual({
+      ok: true,
+      value: { cargo_length_in: 120, cargo_width_in: 60, cargo_height_in: 50, cargo_capacity_lbs: 2000 },
+    });
+    expect(validateDimensions({ cargo_length_in: 120, cargo_width_in: 60, cargo_height_in: 50 })).toMatchObject({ ok: false });
+    expect(validateDimensions({ cargo_length_in: 5000, cargo_width_in: 60, cargo_height_in: 50, cargo_capacity_lbs: 1 })).toEqual({
+      ok: false,
+      error: 'Cargo length must be between 12 and 480 in',
+    });
+    expect(validateDimensions({ cargo_length_in: 120, cargo_width_in: 60, cargo_height_in: 50, cargo_capacity_lbs: 10 })).toMatchObject({ ok: false });
+  });
+
+  it('insurance details', () => {
+    const good = {
+      insurance_carrier: ' Acme  Mutual ',
+      insurance_policy: 'POL-1',
+      insurance_expiry: '2027-01-01',
+      insurance_bi_per_person: '$30,000',
+      insurance_bi_per_accident: 60000,
+      insurance_pd_limit: '15000',
+      insurance_business_use: false,
+    };
+    const r = validateInsuranceDetails(good, TODAY);
+    expect(r).toMatchObject({ ok: true, value: { insurance_carrier: 'Acme Mutual', insurance_bi_per_person: 30000, insurance_business_use: false } });
+    expect(validateInsuranceDetails({ ...good, insurance_expiry: '2026-10-31' }, TODAY)).toMatchObject({ ok: false });
+    expect(validateInsuranceDetails({ ...good, insurance_expiry: '2026-02-30' }, TODAY)).toMatchObject({ ok: false });
+    expect(validateInsuranceDetails({ ...good, insurance_business_use: 'yes' }, TODAY)).toMatchObject({ ok: false });
+    expect(validateInsuranceDetails({ ...good, insurance_carrier: '' }, TODAY)).toMatchObject({ ok: false });
+    expect(validateInsuranceDetails({ ...good, insurance_pd_limit: -1 }, TODAY)).toMatchObject({ ok: false });
+  });
+
+  it('registration expiry', () => {
+    expect(validateRegistrationExpiry({ registration_expiry: '2027-01-01' }, TODAY)).toEqual({ ok: true, value: { registration_expiry: '2027-01-01' } });
+    expect(validateRegistrationExpiry({ registration_expiry: '2026-01-01' }, TODAY)).toMatchObject({ ok: false });
+    expect(isValidDateString('2026-13-01')).toBe(false);
+  });
+});
+
+describe('storage paths', () => {
+  it('own folder only, single safe file segment', () => {
+    expect(isOwnUploadPath(`drivers/${P}/gloves-1.jpg`, P)).toBe(true);
+    expect(isOwnUploadPath(`drivers/${P}/../x.jpg`, P)).toBe(false);
+    expect(isOwnUploadPath(`drivers/${P}/a/b.jpg`, P)).toBe(false);
+    expect(isOwnUploadPath(`drivers/other/x.jpg`, P)).toBe(false);
+    expect(isOwnUploadPath(`insurance/x.jpg`, P)).toBe(false);
+    expect(isOwnUploadPath(42, P)).toBe(false);
+    expect(isOwnUploadPath(buildUploadPath(P, 'hand_truck', 'jpg', 1761600000000, 0.123456), P)).toBe(true);
+  });
+});
+
+describe('parseReviewDecision', () => {
+  it('validates item, decision, and reason', () => {
+    expect(parseReviewDecision({ item: 'gloves', decision: 'approve', photo_path: 'p' })).toEqual({
+      ok: true,
+      value: { item: 'gloves', decision: 'approve', reason: null, photo_path: 'p' },
+    });
+    expect(parseReviewDecision({ item: 'gloves', decision: 'reject' })).toMatchObject({ ok: false });
+    expect(parseReviewDecision({ item: 'gloves', decision: 'reject', reason: ' Blurry ' })).toMatchObject({ ok: true, value: { reason: 'Blurry' } });
+    expect(parseReviewDecision({ item: 'license', decision: 'approve' })).toMatchObject({ ok: false });
+    expect(parseReviewDecision({ item: 'gloves', decision: 'maybe' })).toMatchObject({ ok: false });
+    expect(parseReviewDecision(null)).toMatchObject({ ok: false });
+  });
+});
+
+describe('onboardingMissing', () => {
+  it('lists only required items; plus items never block', () => {
+    const all = Object.fromEntries(REQUIRED_ITEMS.map((i) => [i.id, true]));
+    expect(onboardingMissing(all)).toEqual([]);
+    expect(onboardingMissing({}).map((d) => d.id)).not.toContain('hand_truck');
+    expect(onboardingMissing({ ...all, gloves: false }).map((d) => d.id)).toEqual(['gloves']);
+  });
+});
