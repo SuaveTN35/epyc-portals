@@ -14,18 +14,11 @@ import {
   CheckCircle,
   CreditCard,
 } from 'lucide-react';
-import { createClient } from '@/lib/supabase/client';
 import { AddressAutocomplete } from '@/components/ui/AddressAutocomplete';
 import { PaymentStep } from '@/components/booking/PaymentStep';
-import { buildCustomerBookingRow } from '@/lib/customer-booking';
-import {
-  SERVICE_LEVEL_CONFIG,
-  VEHICLE_CONFIG,
-  calculateQuote,
-  generateTrackingNumber,
-  formatCurrency,
-} from '@epyc/shared';
-import type { ServiceLevel, VehicleType, QuoteRequest } from '@epyc/shared';
+import type { CustomerQuote } from '@/lib/customer-booking';
+import { SERVICE_LEVEL_CONFIG, VEHICLE_CONFIG, formatCurrency } from '@epyc/shared';
+import type { ServiceLevel, VehicleType } from '@epyc/shared';
 
 type Step = 'pickup' | 'delivery' | 'package' | 'quote' | 'payment' | 'confirm';
 
@@ -44,10 +37,6 @@ export default function NewDeliveryPage() {
   // Coordinates for distance calculation
   const [pickupCoords, setPickupCoords] = useState<Coordinates | null>(null);
   const [deliveryCoords, setDeliveryCoords] = useState<Coordinates | null>(null);
-  const [distanceData, setDistanceData] = useState<{
-    distance_miles: number;
-    duration_minutes: number;
-  } | null>(null);
 
   // Delivery booking state
   const [deliveryId, setDeliveryId] = useState<string | null>(null);
@@ -89,8 +78,9 @@ export default function NewDeliveryPage() {
     vehicle_required: 'car' as VehicleType,
   });
 
-  // Quote result
-  const [quote, setQuote] = useState<ReturnType<typeof calculateQuote> | null>(null);
+  // Quote result. Always the SERVER quote (POST /api/client/deliveries);
+  // the browser never computes or sends a price.
+  const [quote, setQuote] = useState<CustomerQuote | null>(null);
 
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>
@@ -146,41 +136,28 @@ export default function NewDeliveryPage() {
     setDeliveryCoords({ lat: data.lat, lng: data.lng });
   };
 
-  const calculateDistance = async (): Promise<number> => {
-    if (!pickupCoords || !deliveryCoords) {
-      // Fallback to mock distance if coordinates aren't available
-      return 15;
+  // Booking payload: the form plus the coordinates picked from the address
+  // suggestions. No price field: the server prices the route itself.
+  const bookingPayload = (quoteOnly: boolean) => ({
+    ...formData,
+    pickup_lat: pickupCoords?.lat ?? null,
+    pickup_lng: pickupCoords?.lng ?? null,
+    delivery_lat: deliveryCoords?.lat ?? null,
+    delivery_lng: deliveryCoords?.lng ?? null,
+    quote_only: quoteOnly,
+  });
+
+  const postBooking = async (quoteOnly: boolean) => {
+    const response = await fetch('/api/client/deliveries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bookingPayload(quoteOnly)),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data?.error || 'Something went wrong. Try again.');
     }
-
-    setCalculatingDistance(true);
-
-    try {
-      const response = await fetch('/api/distance', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          origin: pickupCoords,
-          destination: deliveryCoords,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to calculate distance');
-      }
-
-      const data = await response.json();
-      setDistanceData({
-        distance_miles: data.distance_miles,
-        duration_minutes: data.duration_minutes,
-      });
-      return data.distance_miles;
-    } catch (err) {
-      console.error('Distance calculation error:', err);
-      // Fallback to mock distance
-      return 15;
-    } finally {
-      setCalculatingDistance(false);
-    }
+    return data as { quote: CustomerQuote; id?: string; tracking_number?: string };
   };
 
   const calculateDeliveryQuote = async () => {
@@ -195,81 +172,51 @@ export default function NewDeliveryPage() {
       setError('Please complete the delivery address');
       return;
     }
+    if (!pickupCoords) {
+      setError('Pickup address: pick the address from the suggestions list so we can price the route.');
+      setStep('pickup');
+      return;
+    }
+    if (!deliveryCoords) {
+      setError('Delivery address: pick the address from the suggestions list so we can price the route.');
+      setStep('delivery');
+      return;
+    }
 
-    const distance = await calculateDistance();
-
-    const quoteRequest: QuoteRequest = {
-      pickup_address: formData.pickup_address,
-      pickup_city: formData.pickup_city,
-      pickup_state: formData.pickup_state,
-      pickup_zip: formData.pickup_zip,
-      delivery_address: formData.delivery_address,
-      delivery_city: formData.delivery_city,
-      delivery_state: formData.delivery_state,
-      delivery_zip: formData.delivery_zip,
-      package_weight: formData.package_weight,
-      package_length: formData.package_length,
-      package_width: formData.package_width,
-      package_height: formData.package_height,
-      service_level: formData.service_level,
-      vehicle_required: formData.vehicle_required,
-      is_medical: formData.is_medical,
-      is_hipaa: formData.is_hipaa,
-      requires_temperature_control: formData.requires_temperature_control,
-      temperature_min: formData.temperature_min,
-      temperature_max: formData.temperature_max,
-    };
-
-    const result = calculateQuote(quoteRequest, distance);
-    setQuote(result);
-    setStep('quote');
+    setCalculatingDistance(true);
+    try {
+      const data = await postBooking(true);
+      setQuote(data.quote);
+      setStep('quote');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not get a quote. Try again.');
+    } finally {
+      setCalculatingDistance(false);
+    }
   };
 
-  // Create delivery and proceed to payment
+  // Create delivery (server prices and inserts) and proceed to payment
   const handleProceedToPayment = async () => {
     if (!quote) return;
 
     setLoading(true);
     setError(null);
 
-    const supabase = createClient();
-    const { data: { user } } = await supabase.auth.getUser();
-
-    if (!user) {
-      setError('You must be logged in to create a delivery');
+    try {
+      const data = await postBooking(false);
+      if (!data.id || !data.tracking_number) {
+        throw new Error('Failed to create delivery');
+      }
+      // The stored price is the one the payment step charges.
+      setQuote(data.quote);
+      setDeliveryId(data.id);
+      setTrackingNumber(data.tracking_number);
+      setStep('payment');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to create delivery');
+    } finally {
       setLoading(false);
-      return;
     }
-
-    const newTrackingNumber = generateTrackingNumber();
-
-    // Only live columns; payment state is tracked in the payments table.
-    const { data: insertedDelivery, error: insertError } = await supabase
-      .from('deliveries')
-      .insert(
-        buildCustomerBookingRow({
-          customerId: user.id,
-          trackingNumber: newTrackingNumber,
-          form: formData,
-          quote,
-          pickup: pickupCoords,
-          dropoff: deliveryCoords,
-        })
-      )
-      .select('id, tracking_number')
-      .single();
-
-    if (insertError || !insertedDelivery) {
-      setError(insertError?.message || 'Failed to create delivery');
-      setLoading(false);
-      return;
-    }
-
-    // Store delivery info and proceed to payment
-    setDeliveryId(insertedDelivery.id);
-    setTrackingNumber(insertedDelivery.tracking_number || newTrackingNumber);
-    setLoading(false);
-    setStep('payment');
   };
 
   // Handle payment success - move to confirmation
@@ -347,7 +294,11 @@ export default function NewDeliveryPage() {
               label="Street Address"
               placeholder="Start typing an address..."
               value={formData.pickup_address}
-              onChange={(value) => setFormData((prev) => ({ ...prev, pickup_address: value }))}
+              onChange={(value) => {
+                setFormData((prev) => ({ ...prev, pickup_address: value }));
+                // Typed text no longer matches the picked point; re-pick to price.
+                setPickupCoords(null);
+              }}
               onAddressSelect={handlePickupAddressSelect}
               required
             />
@@ -459,7 +410,11 @@ export default function NewDeliveryPage() {
               label="Street Address"
               placeholder="Start typing an address..."
               value={formData.delivery_address}
-              onChange={(value) => setFormData((prev) => ({ ...prev, delivery_address: value }))}
+              onChange={(value) => {
+                setFormData((prev) => ({ ...prev, delivery_address: value }));
+                // Typed text no longer matches the picked point; re-pick to price.
+                setDeliveryCoords(null);
+              }}
               onAddressSelect={handleDeliveryAddressSelect}
               required
             />

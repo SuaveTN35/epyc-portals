@@ -179,6 +179,81 @@ export const createDeliverySchema = z.object({
   scheduled_delivery_time: z.string().optional(),
 });
 
+// Customer booking (POST /api/client/deliveries). The browser sends the form
+// and the two picked coordinates. It never sends a price: the server
+// recomputes distance and price. Unknown keys are rejected (.strict()), and
+// the route checks BOOKING_FORBIDDEN_FIELDS first to give a clear message.
+export const BOOKING_FORBIDDEN_FIELDS = [
+  'total_price',
+  'base_price',
+  'distance_price',
+  'weight_surcharge',
+  'rush_surcharge',
+  'hipaa_surcharge',
+  'temperature_surcharge',
+  'service_multiplier',
+  'driver_payout',
+  'tip_amount',
+  'distance_miles',
+  'estimated_duration_minutes',
+  'amount',
+  'price',
+  'quote',
+  'company_id',
+  'customer_id',
+  'driver_id',
+  'status',
+  'tracking_number',
+] as const;
+
+const bookingText = (max: number) => z.string().trim().max(max).default('');
+const bookingCoord = z.number().finite().nullable().optional();
+const bookingNumber = (min: number, max: number) =>
+  z.coerce.number().finite().min(min).max(max).default(0);
+
+export const customerBookingSchema = z
+  .object({
+    pickup_address: z.string().trim().min(1, 'Pickup address is required').max(500),
+    pickup_city: z.string().trim().min(1, 'Pickup city is required').max(100),
+    pickup_state: z.string().trim().min(2, 'Pickup state is required').max(50),
+    pickup_zip: z.string().trim().min(5, 'Pickup ZIP is required').max(20),
+    pickup_contact_name: bookingText(200),
+    pickup_contact_phone: bookingText(50),
+    pickup_instructions: bookingText(1000),
+    pickup_lat: bookingCoord,
+    pickup_lng: bookingCoord,
+
+    delivery_address: z.string().trim().min(1, 'Delivery address is required').max(500),
+    delivery_city: z.string().trim().min(1, 'Delivery city is required').max(100),
+    delivery_state: z.string().trim().min(2, 'Delivery state is required').max(50),
+    delivery_zip: z.string().trim().min(5, 'Delivery ZIP is required').max(20),
+    delivery_contact_name: bookingText(200),
+    delivery_contact_phone: bookingText(50),
+    delivery_instructions: bookingText(1000),
+    delivery_lat: bookingCoord,
+    delivery_lng: bookingCoord,
+
+    package_description: bookingText(500),
+    package_weight: bookingNumber(0, 10000),
+    package_length: bookingNumber(0, 1000),
+    package_width: bookingNumber(0, 1000),
+    package_height: bookingNumber(0, 1000),
+    requires_signature: z.boolean().default(true),
+    is_fragile: z.boolean().default(false),
+    is_medical: z.boolean().default(false),
+    is_hipaa: z.boolean().default(false),
+    requires_temperature_control: z.boolean().default(false),
+    temperature_min: z.coerce.number().finite().min(-100).max(100).default(2),
+    temperature_max: z.coerce.number().finite().min(-100).max(100).default(8),
+
+    service_level: z.enum(['standard', 'priority', 'rush', 'scheduled']).default('standard'),
+    vehicle_required: z.enum(['car', 'suv', 'van', 'truck', 'box_truck']).optional(),
+
+    /** true: price only, nothing is written. */
+    quote_only: z.boolean().optional(),
+  })
+  .strict();
+
 // Type exports
 export type DistanceRequest = z.infer<typeof distanceRequestSchema>;
 export type CreatePaymentIntent = z.infer<typeof createPaymentIntentSchema>;
@@ -186,6 +261,7 @@ export type MedicalBrokerPayload = z.infer<typeof medicalBrokerPayloadSchema>;
 export type LogisticsBrokerPayload = z.infer<typeof logisticsBrokerPayloadSchema>;
 export type GenericBrokerPayload = z.infer<typeof genericBrokerPayloadSchema>;
 export type CreateDelivery = z.infer<typeof createDeliverySchema>;
+export type CustomerBookingRequest = z.infer<typeof customerBookingSchema>;
 
 // Validation helper
 export function validateRequest<T>(

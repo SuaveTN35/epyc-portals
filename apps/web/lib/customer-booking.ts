@@ -1,8 +1,22 @@
-// Builds the deliveries row a customer inserts from the booking form.
-// Only live columns (packages/supabase/LIVE-SCHEMA-SNAPSHOT-2026-10-27.md).
-// Pricing values are copied from the quote unchanged. driver_payout is not
-// sent: the insert guard (20261028000200) nulls it for customers and dispatch
-// sets it when offering the job. Payment state lives in the payments table.
+// Customer booking, server side (POST /api/client/deliveries, P-358).
+// The browser sends the form and the two picked coordinates; the server
+// validates them, recomputes distance (lib/server/distance.ts) and price
+// (calculateQuote), and inserts with the service role. Nothing in the
+// request body is trusted for price, customer, status, or tracking number.
+//
+// buildCustomerBookingRow writes only live columns
+// (packages/supabase/LIVE-SCHEMA-SNAPSHOT-2026-10-27.md). driver_payout is
+// not sent: dispatch sets it when offering the job. company_id and
+// tip_amount are not sent either (column defaults NULL and 0). Payment state
+// lives in the payments table.
+
+import { calculateQuote } from '@epyc/shared';
+import type { QuoteRequest } from '@epyc/shared';
+import {
+  BOOKING_FORBIDDEN_FIELDS,
+  customerBookingSchema,
+  type CustomerBookingRequest,
+} from '@/lib/validations';
 
 export interface BookingForm {
   pickup_address: string;
@@ -101,7 +115,7 @@ export function buildCustomerBookingRow(args: {
     requires_temperature_control: form.requires_temperature_control,
     temperature_min: form.requires_temperature_control ? form.temperature_min : null,
     temperature_max: form.requires_temperature_control ? form.temperature_max : null,
-    // Pricing (from the quote, unchanged)
+    // Pricing (server quote, copied unchanged)
     distance_miles: quote.distance_miles,
     estimated_duration_minutes: quote.estimated_duration_minutes,
     base_price: quote.base_price,
@@ -115,4 +129,147 @@ export function buildCustomerBookingRow(args: {
     service_level: form.service_level,
     vehicle_required: quote.vehicle_required,
   };
+}
+
+// ---------------------------------------------------------------- service area
+
+/**
+ * Southern California service bounding box. Covers Los Angeles, Orange,
+ * Ventura, San Bernardino, and Riverside counties:
+ *   south 33.30  (San Clemente / Temecula; includes Catalina)
+ *   north 35.82  (northern tip of San Bernardino County)
+ *   west -119.65 (western edge of Ventura County, Rincon)
+ *   east -114.13 (Colorado River, San Bernardino / Riverside east line)
+ * A box is coarse on purpose: it also admits slivers of Kern, northern San
+ * Diego, and Santa Barbara counties. It exists to stop absurd or forged
+ * coordinates (other states, 0,0, oceans far offshore), not to draw the
+ * exact service map. Dispatch still reviews every job.
+ */
+export const SERVICE_AREA_BOUNDS = {
+  minLat: 33.3,
+  maxLat: 35.82,
+  minLng: -119.65,
+  maxLng: -114.13,
+} as const;
+
+export function isInServiceArea(lat: number, lng: number): boolean {
+  return (
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= SERVICE_AREA_BOUNDS.minLat &&
+    lat <= SERVICE_AREA_BOUNDS.maxLat &&
+    lng >= SERVICE_AREA_BOUNDS.minLng &&
+    lng <= SERVICE_AREA_BOUNDS.maxLng
+  );
+}
+
+export const PICK_FROM_SUGGESTIONS_MESSAGE =
+  'Pick the address from the suggestions list so we can price the route.';
+
+function finite(n: unknown): n is number {
+  return typeof n === 'number' && Number.isFinite(n);
+}
+
+export type CoordinateCheck =
+  | { ok: true; pickup: Coords; dropoff: Coords }
+  | { ok: false; error: string };
+
+/** Missing, non-finite, or out-of-area coordinates are refused. No fallback distance. */
+export function checkBookingCoordinates(body: {
+  pickup_lat?: number | null;
+  pickup_lng?: number | null;
+  delivery_lat?: number | null;
+  delivery_lng?: number | null;
+}): CoordinateCheck {
+  const { pickup_lat, pickup_lng, delivery_lat, delivery_lng } = body;
+  if (!finite(pickup_lat) || !finite(pickup_lng)) {
+    return { ok: false, error: `Pickup address: ${PICK_FROM_SUGGESTIONS_MESSAGE}` };
+  }
+  if (!finite(delivery_lat) || !finite(delivery_lng)) {
+    return { ok: false, error: `Delivery address: ${PICK_FROM_SUGGESTIONS_MESSAGE}` };
+  }
+  if (!isInServiceArea(pickup_lat, pickup_lng)) {
+    return { ok: false, error: 'The pickup address is outside our Southern California service area.' };
+  }
+  if (!isInServiceArea(delivery_lat, delivery_lng)) {
+    return { ok: false, error: 'The delivery address is outside our Southern California service area.' };
+  }
+  return {
+    ok: true,
+    pickup: { lat: pickup_lat, lng: pickup_lng },
+    dropoff: { lat: delivery_lat, lng: delivery_lng },
+  };
+}
+
+// ---------------------------------------------------------------- request
+
+/** Keys the browser must never send. Returns the ones present. */
+export function findForbiddenBookingFields(raw: unknown): string[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const keys = new Set(Object.keys(raw as Record<string, unknown>));
+  return BOOKING_FORBIDDEN_FIELDS.filter((k) => keys.has(k));
+}
+
+export type ParsedBooking =
+  | { ok: true; body: CustomerBookingRequest; pickup: Coords; dropoff: Coords }
+  | { ok: false; httpStatus: 400; error: string; details?: Array<{ field: string; message: string }> };
+
+export function parseBookingRequest(raw: unknown): ParsedBooking {
+  const forbidden = findForbiddenBookingFields(raw);
+  if (forbidden.length > 0) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      error: `Price and booking fields are set by the server and must not be sent: ${forbidden.join(', ')}`,
+    };
+  }
+  const parsed = customerBookingSchema.safeParse(raw);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      httpStatus: 400,
+      error: 'Invalid booking request',
+      details: parsed.error.errors.map((e) => ({ field: e.path.join('.'), message: e.message })),
+    };
+  }
+  const coords = checkBookingCoordinates(parsed.data);
+  if (!coords.ok) return { ok: false, httpStatus: 400, error: coords.error };
+  return { ok: true, body: parsed.data, pickup: coords.pickup, dropoff: coords.dropoff };
+}
+
+// ---------------------------------------------------------------- quote
+
+export type ServerQuote = ReturnType<typeof calculateQuote>;
+/** What the customer sees: the server quote without the driver payout. */
+export type CustomerQuote = Omit<ServerQuote, 'driver_payout'>;
+
+export function quoteForBooking(body: CustomerBookingRequest, distanceMiles: number): ServerQuote {
+  const request: QuoteRequest = {
+    pickup_address: body.pickup_address,
+    pickup_city: body.pickup_city,
+    pickup_state: body.pickup_state,
+    pickup_zip: body.pickup_zip,
+    delivery_address: body.delivery_address,
+    delivery_city: body.delivery_city,
+    delivery_state: body.delivery_state,
+    delivery_zip: body.delivery_zip,
+    package_weight: body.package_weight,
+    package_length: body.package_length,
+    package_width: body.package_width,
+    package_height: body.package_height,
+    service_level: body.service_level,
+    vehicle_required: body.vehicle_required,
+    is_medical: body.is_medical,
+    is_hipaa: body.is_hipaa,
+    requires_temperature_control: body.requires_temperature_control,
+    temperature_min: body.temperature_min,
+    temperature_max: body.temperature_max,
+  };
+  return calculateQuote(request, distanceMiles);
+}
+
+export function toCustomerQuote(quote: ServerQuote): CustomerQuote {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { driver_payout, ...rest } = quote;
+  return rest;
 }

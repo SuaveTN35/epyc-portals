@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { buildCustomerBookingRow, type BookingForm, type BookingQuote } from './customer-booking';
+import { calculateQuote } from '@epyc/shared';
+import {
+  buildCustomerBookingRow,
+  checkBookingCoordinates,
+  findForbiddenBookingFields,
+  isInServiceArea,
+  parseBookingRequest,
+  quoteForBooking,
+  toCustomerQuote,
+  SERVICE_AREA_BOUNDS,
+  type BookingForm,
+  type BookingQuote,
+} from './customer-booking';
 
 // deliveries columns from packages/supabase/LIVE-SCHEMA-SNAPSHOT-2026-10-27.md
 // plus Phase 2 (source, source_reference, loading_required).
@@ -97,7 +109,7 @@ describe('buildCustomerBookingRow', () => {
     expect(row.customer_id).toBe('u1');
   });
 
-  it('copies quote pricing unchanged', () => {
+  it('copies the (server) quote pricing unchanged', () => {
     expect(row.total_price).toBe(43.45);
     expect(row.distance_price).toBe(18.45);
     expect(row.base_price).toBe(25);
@@ -109,5 +121,172 @@ describe('buildCustomerBookingRow', () => {
     expect(row.delivery_lat).toBeNull();
     expect(row.temperature_min).toBeNull();
     expect(row.temperature_max).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------- P-358
+
+const DOWNTOWN_LA = { lat: 34.0522, lng: -118.2437 };
+const SANTA_MONICA = { lat: 34.0195, lng: -118.4912 };
+
+const validBody = () => ({
+  ...form,
+  pickup_lat: DOWNTOWN_LA.lat,
+  pickup_lng: DOWNTOWN_LA.lng,
+  delivery_lat: SANTA_MONICA.lat,
+  delivery_lng: SANTA_MONICA.lng,
+  vehicle_required: 'car',
+});
+
+describe('service area bounding box', () => {
+  it.each([
+    ['Downtown Los Angeles', 34.0522, -118.2437],
+    ['Irvine (Orange)', 33.6846, -117.8265],
+    ['Ventura', 34.2746, -119.229],
+    ['San Bernardino', 34.1083, -117.2898],
+    ['Riverside', 33.9806, -117.3755],
+    ['Palm Springs (Riverside)', 33.8303, -116.5453],
+    ['Lancaster (LA)', 34.6868, -118.1542],
+    ['Needles (San Bernardino, east edge)', 34.8481, -114.6141],
+  ])('accepts %s', (_name, lat, lng) => {
+    expect(isInServiceArea(lat, lng)).toBe(true);
+  });
+
+  it.each([
+    ['San Francisco', 37.7749, -122.4194],
+    ['San Diego downtown', 32.7157, -117.1611],
+    ['Las Vegas', 36.1699, -115.1398],
+    ['Phoenix', 33.4484, -112.074],
+    ['Null Island', 0, 0],
+    ['Santa Barbara', 34.4208, -119.6982],
+  ])('rejects %s', (_name, lat, lng) => {
+    expect(isInServiceArea(lat, lng)).toBe(false);
+  });
+
+  it('rejects non-finite values and accepts the exact edges', () => {
+    expect(isInServiceArea(Number.NaN, -118)).toBe(false);
+    expect(isInServiceArea(34, Number.POSITIVE_INFINITY)).toBe(false);
+    expect(isInServiceArea(SERVICE_AREA_BOUNDS.minLat, SERVICE_AREA_BOUNDS.minLng)).toBe(true);
+    expect(isInServiceArea(SERVICE_AREA_BOUNDS.maxLat, SERVICE_AREA_BOUNDS.maxLng)).toBe(true);
+  });
+});
+
+describe('checkBookingCoordinates', () => {
+  it('requires both points and asks the customer to pick from suggestions', () => {
+    const r1 = checkBookingCoordinates({ delivery_lat: 34, delivery_lng: -118 });
+    expect(r1.ok).toBe(false);
+    if (!r1.ok) expect(r1.error).toMatch(/^Pickup address: Pick the address from the suggestions/);
+    const r2 = checkBookingCoordinates({ pickup_lat: 34, pickup_lng: -118, delivery_lat: null, delivery_lng: -118 });
+    expect(r2.ok).toBe(false);
+    if (!r2.ok) expect(r2.error).toMatch(/^Delivery address:/);
+  });
+
+  it('rejects out-of-area points', () => {
+    const r = checkBookingCoordinates({ pickup_lat: 34, pickup_lng: -118, delivery_lat: 40.7, delivery_lng: -74 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/delivery address is outside/);
+  });
+
+  it('returns both points when valid', () => {
+    const r = checkBookingCoordinates(validBody());
+    expect(r).toEqual({ ok: true, pickup: DOWNTOWN_LA, dropoff: SANTA_MONICA });
+  });
+});
+
+describe('parseBookingRequest', () => {
+  it('accepts a clean booking body', () => {
+    const r = parseBookingRequest(validBody());
+    expect(r.ok).toBe(true);
+  });
+
+  it.each([
+    'total_price',
+    'base_price',
+    'distance_price',
+    'rush_surcharge',
+    'driver_payout',
+    'tip_amount',
+    'company_id',
+    'customer_id',
+    'status',
+    'tracking_number',
+    'distance_miles',
+    'amount',
+  ])('rejects a body that carries %s', (field) => {
+    const r = parseBookingRequest({ ...validBody(), [field]: 1 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.httpStatus).toBe(400);
+      expect(r.error).toContain(field);
+    }
+  });
+
+  it('rejects unknown keys (strict schema)', () => {
+    const r = parseBookingRequest({ ...validBody(), discount: 50 });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe('Invalid booking request');
+  });
+
+  it('rejects missing coordinates with the pick-from-suggestions message (no 15-mile fallback)', () => {
+    const body: Record<string, unknown> = validBody();
+    delete body.pickup_lat;
+    delete body.pickup_lng;
+    const r = parseBookingRequest(body);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/suggestions/);
+  });
+
+  it('rejects non-numeric coordinates and an invalid service level', () => {
+    expect(parseBookingRequest({ ...validBody(), pickup_lat: '34' }).ok).toBe(false);
+    expect(parseBookingRequest({ ...validBody(), service_level: 'free' }).ok).toBe(false);
+  });
+
+  it('rejects non-object bodies', () => {
+    expect(parseBookingRequest(null).ok).toBe(false);
+    expect(parseBookingRequest([1, 2]).ok).toBe(false);
+    expect(findForbiddenBookingFields('total_price')).toEqual([]);
+  });
+});
+
+describe('quoteForBooking', () => {
+  it('equals calculateQuote for the same inputs (pricing math untouched)', () => {
+    const r = parseBookingRequest({ ...validBody(), service_level: 'rush', is_hipaa: true, package_weight: 80 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const q = quoteForBooking(r.body, 12.3);
+    const expected = calculateQuote(
+      {
+        pickup_address: form.pickup_address,
+        pickup_city: form.pickup_city,
+        pickup_state: form.pickup_state,
+        pickup_zip: form.pickup_zip,
+        delivery_address: form.delivery_address,
+        delivery_city: form.delivery_city,
+        delivery_state: form.delivery_state,
+        delivery_zip: form.delivery_zip,
+        package_weight: 80,
+        package_length: 10,
+        package_width: 10,
+        package_height: 10,
+        service_level: 'rush',
+        vehicle_required: 'car',
+        is_medical: false,
+        is_hipaa: true,
+        requires_temperature_control: false,
+        temperature_min: 2,
+        temperature_max: 8,
+      },
+      12.3
+    );
+    expect(q).toEqual(expected);
+    expect(q.total_price).toBeGreaterThan(0);
+  });
+
+  it('toCustomerQuote hides the driver payout', () => {
+    const r = parseBookingRequest(validBody());
+    if (!r.ok) throw new Error('expected ok');
+    const cq = toCustomerQuote(quoteForBooking(r.body, 10));
+    expect(cq).not.toHaveProperty('driver_payout');
+    expect(cq.total_price).toBeGreaterThan(0);
   });
 });
