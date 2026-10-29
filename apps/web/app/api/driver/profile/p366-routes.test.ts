@@ -305,7 +305,17 @@ describe('POST /api/driver/profile/signed-urls', () => {
       return { data: null, error: null };
     };
     const res = await signedUrls(jsonReq('/api/driver/profile/signed-urls', {
-      paths: ['drivers/prof-1/./x.jpg', 'drivers/prof-1/z/%2e%2e/x.jpg', 'drivers/prof-1//x.jpg', '/drivers/prof-1/x.jpg', 'drivers/prof-1/ok.jpg'],
+      paths: [
+        'drivers/prof-1/./x.jpg',
+        'drivers/prof-1/z/%2e%2e/x.jpg',
+        'drivers/prof-1//x.jpg',
+        '/drivers/prof-1/x.jpg',
+        'drivers/prof-1/ok.jpg?/x',
+        'drivers/prof-1/ok.jpg#/x',
+        'drivers/prof-1/my photo.jpg',
+        'drivers/prof-1/fot\u00f3.jpg',
+        'drivers/prof-1/ok.jpg',
+      ],
     }));
     expect(res.status).toBe(200);
     expect(state.signed).toEqual(['drivers/prof-1/ok.jpg']);

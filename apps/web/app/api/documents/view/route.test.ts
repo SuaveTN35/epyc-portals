@@ -78,6 +78,10 @@ describe('GET /api/documents/view', () => {
       'drivers\\P1\\vehicle_front-1.jpg',
       'drivers/P1/vehicle_front-1.jpg\u0000',
       'drivers/P1/vehicle%20front.jpg',
+      'drivers/P1/vehicle_front-1.jpg?/x',
+      'drivers/P1/vehicle_front-1.jpg#/x',
+      'drivers/P1/vehicle front-1.jpg',
+      'drivers/P1/v\u00e9hicule-1.jpg',
     ]) {
       const res = await GET(req(p));
       expect(res.status, p).toBe(400);

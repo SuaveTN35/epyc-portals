@@ -14,21 +14,25 @@ export const ALLOWED_DOCUMENT_PREFIXES = [
   'drivers/',
 ] as const;
 
-// Control characters (C0, DEL, C1).
-// eslint-disable-next-line no-control-regex
-const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
+// One path segment: starts with a letter or digit, then letters, digits,
+// ".", "_", "-". So no "." / ".." segments, no "%", "?", "#", spaces,
+// backslashes, control or non-ASCII characters.
+const SEGMENT = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const MAX_PATH_LENGTH = 512;
 
 /**
- * A storage path that can only mean itself. storage-js does not encode the
- * path, and fetch normalizes the URL, so "drivers/p/./x.jpg" or
- * "drivers/p/z/%2e%2e/x.jpg" would reach "drivers/p/x.jpg" while passing a
- * prefix or pattern check (AEQUALIS QA, P-366). Refused: a leading "/", any
- * empty, "." or ".." segment, any "%", any backslash, any control character.
+ * A storage path that can only mean itself (allowlist). storage-js does not
+ * encode the path and fetch rewrites the URL: "./" and "%2e%2e" collapse, and
+ * "?" or "#" cut the path short, so "drivers/p/x.jpg?/y" reaches
+ * "drivers/p/x.jpg" while a prefix or pattern check sees something else
+ * (AEQUALIS QA, P-366). Every segment must match SEGMENT, segments are joined
+ * by single "/", no leading or trailing "/", at most 512 characters. Every
+ * object in the live driver-documents bucket matches (454 of 454, checked
+ * 2026-10-28), as do the paths both upload routes create.
  */
 export function isSafeStoragePath(path: unknown): path is string {
-  if (typeof path !== 'string' || path.length === 0 || path.length > 512) return false;
-  if (path.startsWith('/') || path.includes('%') || path.includes('\\') || CONTROL_CHARS.test(path)) return false;
-  return path.split('/').every((seg) => seg !== '' && seg !== '.' && seg !== '..');
+  if (typeof path !== 'string' || path.length === 0 || path.length > MAX_PATH_LENGTH) return false;
+  return path.split('/').every((seg) => SEGMENT.test(seg));
 }
 
 export function isAllowedDocumentPath(path: unknown): path is string {

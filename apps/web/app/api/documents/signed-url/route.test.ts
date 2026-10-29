@@ -69,6 +69,10 @@ describe('POST /api/documents/signed-url', () => {
       '/drivers/P1/vehicle_front-1.jpg',
       'drivers/P1/z/../vehicle_front-1.jpg',
       'drivers\\P1\\x.jpg',
+      'drivers/P1/vehicle_front-1.jpg?/x',
+      'drivers/P1/vehicle_front-1.jpg#/x',
+      'drivers/P1/vehicle front-1.jpg',
+      'drivers/P1/v\u00e9hicule-1.jpg',
     ];
     for (const p of bad) expect((await POST(req({ path: p }))).status, p).toBe(400);
     const res = await POST(req({ paths: [...bad, 'drivers/P1/registration-1.jpg'] }));
