@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { requestAssignedText } from '@/lib/sms-client';
 import { loadDriverReadiness } from '@/lib/driver-readiness';
+import { activeJobDriverIds, isActiveJobStatus, loadLapsedInsuranceDrivers } from '@/lib/insurance-alerts';
+import { InsuranceLapsedFlag } from '@/components/dispatch/InsuranceLapsedFlag';
 import {
   Package,
   Search,
@@ -105,6 +107,8 @@ export default function DeliveriesPage() {
   const [selectedDelivery, setSelectedDelivery] = useState<Delivery | null>(null);
   const [assigning, setAssigning] = useState(false);
   const [assignError, setAssignError] = useState<string | null>(null);
+  // P-366: drivers on active jobs whose insurance lapsed (alert only).
+  const [lapsedDrivers, setLapsedDrivers] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchDeliveries();
@@ -190,6 +194,7 @@ export default function DeliveriesPage() {
           broker_type: d.broker_deliveries?.[0]?.broker?.type || null,
         }))
       );
+      setLapsedDrivers(await loadLapsedInsuranceDrivers(supabase, activeJobDriverIds(data)));
     }
 
     setLoading(false);
@@ -498,6 +503,9 @@ export default function DeliveriesPage() {
                             </span>
                           )}
                         </div>
+                        {delivery.driver_id && isActiveJobStatus(delivery.status) && lapsedDrivers.has(delivery.driver_id) && (
+                          <InsuranceLapsedFlag className="mt-1" />
+                        )}
                       </td>
                       <td>
                         <span

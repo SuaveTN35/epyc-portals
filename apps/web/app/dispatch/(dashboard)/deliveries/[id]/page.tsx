@@ -33,6 +33,8 @@ import {
 } from '@/lib/delivery-status';
 import { jobSourceLabel } from '@/lib/new-job';
 import { OfferJobDialog } from '@/components/dispatch/OfferJobDialog';
+import { InsuranceLapsedFlag } from '@/components/dispatch/InsuranceLapsedFlag';
+import { isActiveJobStatus, loadLapsedInsuranceDrivers } from '@/lib/insurance-alerts';
 import { leftWithLabel, mapsLink } from '@/lib/proof-flow';
 import { openExceptions, resolvedNote } from '@/lib/driver-job';
 
@@ -150,6 +152,8 @@ export default function DeliveryDetailPage() {
   const [offerNotice, setOfferNotice] = useState<string | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
+  // P-366: the driver on this active job has lapsed insurance (alert only).
+  const [insuranceLapsed, setInsuranceLapsed] = useState(false);
 
   useEffect(() => {
     if (params.id) {
@@ -210,6 +214,12 @@ export default function DeliveryDetailPage() {
             }
           : null,
       });
+      const driverId = deliveryData.driver?.id as string | undefined;
+      setInsuranceLapsed(
+        !!driverId &&
+          isActiveJobStatus(deliveryData.status) &&
+          (await loadLapsedInsuranceDrivers(supabase, [driverId])).has(driverId)
+      );
     }
 
     // Fetch job offers for this delivery (staff select policy, Phase 1)
@@ -421,6 +431,7 @@ export default function DeliveryDetailPage() {
                 {delivery.source_reference ? ` #${delivery.source_reference}` : ''}
               </span>
             </div>
+            {insuranceLapsed && <InsuranceLapsedFlag className="mt-2 text-xs" />}
           </div>
         </div>
         <div className="flex gap-2">

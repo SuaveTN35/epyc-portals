@@ -10,8 +10,9 @@
 // gear declared with optional photo (R12); ID badge photo only after
 // approval (R1); deliveries.required_equipment; privileges (QA N3); the
 // interaction with the live Phase 0 / Phase 1 drivers guard (AEQUALIS QA
-// reproduction, folded in 2026-10-28); and 20261028000600 (required items
-// block new work, Commander ruling 2026-10-28).
+// reproduction, folded in 2026-10-28); 20261028000600 (required items
+// block new work, Commander ruling 2026-10-28); and 20261028000650 (14-day
+// grace for that block for drivers already active).
 import { PGlite } from '@electric-sql/pglite';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -490,6 +491,38 @@ ok('A: expired insurance still reported first', /^Insurance expired on /.test(aw
 await db.exec(`update drivers set insurance_expiry = current_date + 100 where id = '${D6}'`);
 r = await as('authenticated', P6, `select public.driver_offer_block_reason('${D6}')`);
 ok('A: drivers still cannot call the function directly', !!r.error);
+
+// ================= Grace for the required-items block (0650, ruling 2026-10-28) =================
+await db.exec(mig('20261028000650_p366_required_items_grace.sql'));
+const ig1 = (await db.query(`select items_required_from::text d from drivers where id = '${D6}'`)).rows[0].d;
+await db.exec(mig('20261028000650_p366_required_items_grace.sql'));
+const ig2 = (await db.query(`select items_required_from::text d from drivers where id = '${D6}'`)).rows[0].d;
+const igToday14 = (await db.query(`select ((now() at time zone 'America/Los_Angeles')::date + 14)::text d`)).rows[0].d;
+ok('D: 0650 applies twice; active driver backfilled to today + 14, not extended by a re-run', ig1 === igToday14 && ig2 === ig1, `${ig1} ${ig2} ${igToday14}`);
+const igPend = (await db.query(`select count(*)::int n from drivers where status <> 'active' and items_required_from is not null`)).rows[0].n;
+ok('D: non-active drivers get no grace date', igPend === 0, String(igPend));
+
+await db.exec(`update drivers set vehicle_photo_cargo_url = null, registration_url = null where id = '${D6}'`);
+ok('D: in grace, missing items do not block', (await reason(D6)) === null, await reason(D6));
+r = await as('service_role', null, `insert into job_offers (delivery_id, driver_id, expires_at) values ('${DEL}', '${D6}', now() + interval '15 minutes') returning id`);
+ok('D: in grace, an offer is allowed', r.rows && r.rows.length === 1, r.error?.message);
+await db.exec(`update drivers set insurance_expiry = current_date - 2 where id = '${D6}'`);
+ok('D: insurance has no grace', /^Insurance expired on /.test(await reason(D6) || ''), await reason(D6));
+await db.exec(`update drivers set insurance_expiry = current_date + 100 where id = '${D6}'`);
+
+r = await as('authenticated', P6, `update drivers set items_required_from = current_date + 365 where id = '${D6}' returning id`);
+ok('D: driver cannot move their own items date', r.error && r.error.code === '42501', r.error?.message || 'updated');
+const P8 = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+await db.exec(`insert into profiles values ('${P8}', 'driver')`);
+r = await commitAs('authenticated', P8, `insert into drivers (profile_id, items_required_from) values ('${P8}', current_date + 365) returning items_required_from`);
+ok('D: applicant insert cannot set an items date', r.rows && r.rows[0].items_required_from === null, r.error?.message || JSON.stringify(r.rows));
+
+await db.exec(`update drivers set items_required_from = (now() at time zone 'America/Los_Angeles')::date where id = '${D6}'`);
+ok('D: on the grace date the block applies', (await reason(D6)) === 'Missing required items: Cargo area, Vehicle registration', await reason(D6));
+await db.exec(`update drivers set items_required_from = null where id = '${D6}'`);
+ok('D: no date (approved after ship) blocks', (await reason(D6)) === 'Missing required items: Cargo area, Vehicle registration', await reason(D6));
+await db.exec(`update drivers set vehicle_photo_cargo_url = 'drivers/${P6}/c.jpg', registration_url = 'drivers/${P6}/reg.jpg' where id = '${D6}'`);
+ok('D: all on file again, not blocked', (await reason(D6)) === null, await reason(D6));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

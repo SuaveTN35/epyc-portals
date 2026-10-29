@@ -6,6 +6,9 @@ import {
   newWorkBlockReason,
   requiredItemsBlockReason,
   NEW_WORK_REQUIRED_ITEM_IDS,
+  requiredItemsInGrace,
+  insuranceLapsed,
+  INSURANCE_LAPSED_FLAG,
   checklist,
   profileGaps,
   dispatchBadges,
@@ -212,6 +215,69 @@ describe('newWorkBlockReason (insurance, then required items; ruling 2026-10-28)
     expect(requiredItemsBlockReason({ ...fullDriver, vehicle_photo_front_url: null }, rows)).toBe(
       'Missing required items: Vehicle - front'
     );
+  });
+});
+
+describe('required-items grace (0650, ruling 2026-10-28)', () => {
+  const rows = approvedRows(fullDriver);
+  const grace: DriverProfileFields = { ...fullDriver, items_required_from: '2026-11-15', vehicle_photo_cargo_url: null };
+
+  it('inside the grace window missing items warn but do not block', () => {
+    expect(requiredItemsInGrace(grace, TODAY)).toBe(true);
+    expect(newWorkBlockReason(grace, rows, TODAY)).toBeNull();
+    expect(driverWarnings(grace, rows, TODAY)).toEqual([
+      { tone: 'amber', text: 'Upload by 2026-11-15 to keep getting offers: Cargo area.' },
+    ]);
+    const labels = dispatchBadges(grace, rows, TODAY).map((b) => b.label);
+    expect(labels).toContain('Required items due 2026-11-15');
+    expect(labels).not.toContain('No new jobs: required items');
+  });
+  it('lists rejected items in the warning too', () => {
+    const rejected = rows.map((r) => (r.item === 'registration' ? { ...r, status: 'rejected', reason: 'Old card' } : r));
+    expect(driverWarnings({ ...grace, vehicle_photo_cargo_url: `drivers/${P}/c.jpg` }, rejected, TODAY)[0].text).toBe(
+      'Upload by 2026-11-15 to keep getting offers: Vehicle registration.'
+    );
+  });
+  it('from the date itself (and with no date) the block applies', () => {
+    expect(newWorkBlockReason({ ...grace, items_required_from: TODAY }, rows, TODAY)).toBe('Missing required items: Cargo area');
+    expect(newWorkBlockReason({ ...grace, items_required_from: null }, rows, TODAY)).toBe('Missing required items: Cargo area');
+    expect(driverWarnings({ ...grace, items_required_from: TODAY }, rows, TODAY)[0].tone).toBe('red');
+  });
+  it('insurance has no grace', () => {
+    expect(newWorkBlockReason({ ...grace, insurance_expiry: '2026-10-01' }, rows, TODAY)).toBe('Insurance expired on 2026-10-01');
+    expect(newWorkBlockReason(grace, rows.filter((r) => r.item !== 'insurance_card'), TODAY)).toBe(
+      'Insurance card has not been reviewed by dispatch'
+    );
+  });
+  it('no warning when nothing is missing', () => {
+    expect(driverWarnings({ ...fullDriver, items_required_from: '2026-11-15' }, rows, TODAY)).toEqual([]);
+  });
+  it('0650 keeps the same item list and guards the date', () => {
+    const text = readFileSync(
+      join(__dirname, '../../../packages/supabase/migrations/20261028000650_p366_required_items_grace.sql'),
+      'utf8'
+    );
+    const pairs = [...text.matchAll(/\(\d+, '([a-z_]+)', '([^']+)'\)/g)].map((m) => [m[1], m[2]]);
+    expect(pairs).toEqual(NEW_WORK_REQUIRED_ITEM_IDS.map((id) => [id, getProfileItem(id)!.label]));
+    expect(text).toContain("'The required items date is set by dispatch'");
+    expect(text).toContain("(now() at time zone 'America/Los_Angeles')::date + 14");
+  });
+});
+
+describe('insuranceLapsed (dispatch alert on active jobs)', () => {
+  const approved = { status: 'approved', photo_path: CARD };
+  it('flags insurance that expired before today, not on the expiry day', () => {
+    expect(insuranceLapsed({ ...fullDriver, insurance_expiry: '2026-10-31' }, approved, TODAY)).toBe(true);
+    expect(insuranceLapsed({ ...fullDriver, insurance_expiry: TODAY }, approved, TODAY)).toBe(false);
+    expect(insuranceLapsed(fullDriver, approved, TODAY)).toBe(false);
+  });
+  it('flags a rejected current card, not an old one', () => {
+    expect(insuranceLapsed(fullDriver, { status: 'rejected', photo_path: CARD }, TODAY)).toBe(true);
+    expect(insuranceLapsed(fullDriver, { status: 'rejected', photo_path: 'insurance/old.jpg' }, TODAY)).toBe(false);
+    expect(insuranceLapsed(fullDriver, { status: 'pending', photo_path: CARD }, TODAY)).toBe(false);
+  });
+  it('uses the exact flag text', () => {
+    expect(INSURANCE_LAPSED_FLAG).toBe('Driver insurance lapsed - consider reassigning');
   });
 });
 

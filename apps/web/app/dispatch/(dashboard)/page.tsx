@@ -27,6 +27,8 @@ import {
   deliveryStatusLabel,
 } from '@/lib/delivery-status';
 import { openExceptions } from '@/lib/driver-job';
+import { activeJobDriverIds, loadLapsedInsuranceDrivers } from '@/lib/insurance-alerts';
+import { INSURANCE_LAPSED_FLAG } from '@/lib/driver-profile';
 
 interface OpenProblem {
   id: string;
@@ -34,6 +36,12 @@ interface OpenProblem {
   tracking_number: string;
   notes: string | null;
   created_at: string;
+}
+
+interface LapsedJob {
+  id: string;
+  tracking_number: string;
+  driver_name: string | null;
 }
 
 interface DashboardStats {
@@ -80,6 +88,8 @@ export default function DashboardPage() {
   const [recentDeliveries, setRecentDeliveries] = useState<RecentDelivery[]>([]);
   const [driverStatuses, setDriverStatuses] = useState<DriverStatus[]>([]);
   const [openProblems, setOpenProblems] = useState<OpenProblem[]>([]);
+  // P-366: active jobs whose driver's insurance lapsed (alert only, no auto-reassign).
+  const [lapsedJobs, setLapsedJobs] = useState<LapsedJob[]>([]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -107,6 +117,21 @@ export default function DashboardPage() {
           notes: e.notes,
           created_at: e.created_at,
         }))
+      );
+
+      // Active jobs whose driver's insurance lapsed since accepting.
+      const { data: activeJobs } = await supabase
+        .from('deliveries')
+        .select('id, tracking_number, status, driver_id, driver:drivers!driver_id(profiles(full_name))')
+        .in('status', ACTIVE_DELIVERY_STATUSES)
+        .not('driver_id', 'is', null)
+        .limit(500);
+      const jobs = (activeJobs || []) as any[];
+      const lapsed = await loadLapsedInsuranceDrivers(supabase, activeJobDriverIds(jobs));
+      setLapsedJobs(
+        jobs
+          .filter((j) => lapsed.has(j.driver_id))
+          .map((j) => ({ id: j.id, tracking_number: j.tracking_number, driver_name: j.driver?.profiles?.full_name || null }))
       );
 
       // Fetch active deliveries count
@@ -345,6 +370,32 @@ export default function DashboardPage() {
                   <span className="text-xs text-gray-500">
                     {new Date(p.created_at).toLocaleString()}
                   </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Active jobs with lapsed driver insurance (P-366) */}
+      {lapsedJobs.length > 0 && (
+        <div className="bg-red-50 border-2 border-red-400 rounded-xl p-4">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="px-2 py-0.5 rounded-full bg-red-600 text-white text-xs font-bold">{lapsedJobs.length}</span>
+            <h2 className="font-semibold text-red-900">{INSURANCE_LAPSED_FLAG}</h2>
+          </div>
+          <p className="text-xs text-red-800 mb-2">
+            These jobs continue; the driver gets no new offers. Nothing is reassigned automatically.
+          </p>
+          <ul className="space-y-2">
+            {lapsedJobs.slice(0, 10).map((j) => (
+              <li key={j.id}>
+                <Link
+                  href={`/dispatch/deliveries/${j.id}`}
+                  className="flex justify-between gap-2 bg-white rounded-lg p-3 hover:bg-red-100 text-sm"
+                >
+                  <span className="font-medium text-gray-900">{j.tracking_number}</span>
+                  <span className="text-gray-700">{j.driver_name || 'Driver'}</span>
                 </Link>
               </li>
             ))}

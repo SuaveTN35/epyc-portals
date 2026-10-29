@@ -52,6 +52,8 @@ export interface DriverProfileFields {
   cargo_width_in?: number | string | null;
   cargo_height_in?: number | string | null;
   cargo_capacity_lbs?: number | string | null;
+  /** Required-items grace (0650): until this date (Pacific) missing items only warn. */
+  items_required_from?: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -138,14 +140,11 @@ export const NEW_WORK_REQUIRED_ITEM_IDS: readonly ProfileItemId[] = (PROFILE_ITE
   .filter((d) => d.required && (d.group === 'vehicle' || d.group === 'documents') && d.id !== 'insurance_card')
   .map((d) => d.id as ProfileItemId);
 
-/**
- * Null when every required item is uploaded and none is rejected. Pending
- * or unreviewed items do not block; registration expiry does not block.
- */
-export function requiredItemsBlockReason(
+/** Required items that are missing, and those rejected (current file), in config order. */
+export function requiredItemProblems(
   driver: DriverProfileFields,
   reviewRows: ReviewRow[] | null | undefined
-): string | null {
+): { missing: string[]; rejected: string[] } {
   const reviews = indexReviews(reviewRows);
   const missing: string[] = [];
   const rejected: string[] = [];
@@ -161,9 +160,44 @@ export function requiredItemsBlockReason(
     if (!file) missing.push(def.label);
     else if (row?.status === 'rejected' && row.photo_path === file) rejected.push(def.label);
   }
+  return { missing, rejected };
+}
+
+/**
+ * Null when every required item is uploaded and none is rejected. Pending
+ * or unreviewed items do not block; registration expiry does not block.
+ * Ignores the grace window (see requiredItemsInGrace).
+ */
+export function requiredItemsBlockReason(
+  driver: DriverProfileFields,
+  reviewRows: ReviewRow[] | null | undefined
+): string | null {
+  const { missing, rejected } = requiredItemProblems(driver, reviewRows);
   if (missing.length > 0) return `Missing required items: ${missing.join(', ')}`;
   if (rejected.length > 0) return `Rejected items need a new upload: ${rejected.join(', ')}`;
   return null;
+}
+
+/**
+ * True while the driver is inside the required-items grace window (0650:
+ * drivers already active when the rule shipped get 14 days). Insurance has
+ * no grace.
+ */
+export function requiredItemsInGrace(driver: Pick<DriverProfileFields, 'items_required_from'>, today: string): boolean {
+  const from = driver.items_required_from?.slice(0, 10);
+  return !!from && daysUntil(from, today) > 0;
+}
+
+/** In grace with items still to fix: the due date and the item labels, else null. */
+export function requiredItemsDue(
+  driver: DriverProfileFields,
+  reviewRows: ReviewRow[] | null | undefined,
+  today: string
+): { date: string; items: string[] } | null {
+  if (!requiredItemsInGrace(driver, today)) return null;
+  const { missing, rejected } = requiredItemProblems(driver, reviewRows);
+  const items = [...missing, ...rejected];
+  return items.length > 0 ? { date: driver.items_required_from!.slice(0, 10), items } : null;
 }
 
 /**
@@ -176,7 +210,38 @@ export function newWorkBlockReason(
   today: string
 ): string | null {
   const insurance = (reviewRows || []).find((r) => r.item === 'insurance_card') ?? null;
-  return offerBlockReason(driver, insurance, today) ?? requiredItemsBlockReason(driver, reviewRows);
+  return (
+    offerBlockReason(driver, insurance, today) ??
+    (requiredItemsInGrace(driver, today) ? null : requiredItemsBlockReason(driver, reviewRows))
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Lapsed insurance on a job already in progress (dispatch alert)
+// ---------------------------------------------------------------------------
+
+/**
+ * Commander ruling 2026-10-28: a job already accepted continues when the
+ * driver's insurance lapses (no new offers, no auto-reassign); dispatch sees
+ * this flag and decides. Lapsed = the expiry date is before today (Pacific;
+ * the expiry day itself still counts as covered, same as offerBlockReason),
+ * or dispatch rejected the card that is on file.
+ */
+export const INSURANCE_LAPSED_FLAG = 'Driver insurance lapsed - consider reassigning';
+
+export function insuranceLapsed(
+  driver: Pick<DriverProfileFields, 'insurance_card_url' | 'insurance_expiry'>,
+  insuranceReview: Pick<ReviewRow, 'status' | 'photo_path'> | null | undefined,
+  today: string
+): boolean {
+  const exp = driver.insurance_expiry?.slice(0, 10);
+  if (exp && isValidDateString(exp) && daysUntil(exp, today) < 0) return true;
+  return (
+    !!insuranceReview &&
+    insuranceReview.status === 'rejected' &&
+    !!driver.insurance_card_url &&
+    insuranceReview.photo_path === driver.insurance_card_url
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -423,9 +488,11 @@ export function dispatchBadges(
   const block = offerBlockReason(driver, reviews['insurance_card'] ?? null, today);
   if (block && ins !== 'expired') {
     badges.push({ key: 'ins-blocked', label: 'No new jobs: insurance', tone: 'red' });
-  } else if (!block && requiredItemsBlockReason(driver, reviewRows)) {
+  } else if (!block && !requiredItemsInGrace(driver, today) && requiredItemsBlockReason(driver, reviewRows)) {
     badges.push({ key: 'items-blocked', label: 'No new jobs: required items', tone: 'red' });
   }
+  const itemsDue = requiredItemsDue(driver, reviewRows, today);
+  if (itemsDue) badges.push({ key: 'items-due', label: `Required items due ${itemsDue.date}`, tone: 'amber' });
 
   const reg = expiryState(driver.registration_expiry, today);
   if (reg === 'expired') badges.push({ key: 'reg-expired', label: 'Registration expired', tone: 'red' });
@@ -471,6 +538,10 @@ export function driverWarnings(
       tone: 'amber',
       text: `Your insurance expires ${d === 0 ? 'today' : `in ${d} day${d === 1 ? '' : 's'}`}. Upload your new card before then to keep getting jobs.`,
     });
+  }
+  const itemsDue = requiredItemsDue(driver, reviewRows, today);
+  if (itemsDue) {
+    out.push({ tone: 'amber', text: `Upload by ${itemsDue.date} to keep getting offers: ${itemsDue.items.join(', ')}.` });
   }
   const reg = expiryState(driver.registration_expiry, today);
   if (reg === 'expired') out.push({ tone: 'amber', text: 'Your vehicle registration has expired. Upload your current registration.' });

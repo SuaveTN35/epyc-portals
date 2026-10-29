@@ -16,6 +16,8 @@
 // required vehicle / document item is missing or rejected (pending is fine).
 // See newWorkBlockReason in lib/driver-profile.ts and
 // driver_offer_block_reason() in the database (migration 20261028000600).
+// Drivers already active when that shipped get a 14-day grace for the items
+// (not for insurance): drivers.items_required_from, migration 0650.
 // The database holds its own copy of the required list: flipping `required`
 // on a vehicle or document item here needs that SQL list changed too (a
 // unit test fails until NEW_WORK_REQUIRED_ITEM_IDS matches it).

@@ -17,7 +17,7 @@ import {
 } from './driver-profile';
 
 export const READINESS_DRIVER_COLUMNS =
-  'id, insurance_card_url, insurance_expiry, insurance_policy, insurance_carrier, insurance_bi_per_person, insurance_bi_per_accident, insurance_pd_limit, insurance_business_use, registration_url, registration_expiry, vehicle_photo_front_url, vehicle_photo_back_url, vehicle_photo_side_url, vehicle_photo_cargo_url, cargo_length_in, cargo_width_in, cargo_height_in, cargo_capacity_lbs';
+  'id, insurance_card_url, insurance_expiry, insurance_policy, insurance_carrier, insurance_bi_per_person, insurance_bi_per_accident, insurance_pd_limit, insurance_business_use, registration_url, registration_expiry, vehicle_photo_front_url, vehicle_photo_back_url, vehicle_photo_side_url, vehicle_photo_cargo_url, cargo_length_in, cargo_width_in, cargo_height_in, cargo_capacity_lbs, items_required_from';
 
 export interface DriverReadiness {
   blockReason: string | null;
