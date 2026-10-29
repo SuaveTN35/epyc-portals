@@ -495,7 +495,15 @@ ok('A: drivers still cannot call the function directly', !!r.error);
 // ================= Grace for the required-items block (0650, ruling 2026-10-28) =================
 await db.exec(mig('20261028000650_p366_required_items_grace.sql'));
 const ig1 = (await db.query(`select items_required_from::text d from drivers where id = '${D6}'`)).rows[0].d;
+// A driver approved AFTER the first apply must not get a grace date from a re-run.
+const P9 = 'f9f9f9f9-f9f9-f9f9-f9f9-f9f9f9f9f9f9';
+await db.exec(`insert into profiles values ('${P9}', 'driver')`);
+r = await commitAs('service_role', null, `insert into drivers (profile_id, status, vehicle_type) values ('${P9}', 'pending', 'car') returning id`);
+const D9 = r.rows?.[0]?.id;
+await commitAs('service_role', null, `update drivers set status = 'active' where id = '${D9}'`);
 await db.exec(mig('20261028000650_p366_required_items_grace.sql'));
+const ig9 = (await db.query(`select items_required_from from drivers where id = '${D9}'`)).rows[0].items_required_from;
+ok('D: re-running 0650 gives no grace to a driver approved after the first apply', ig9 === null, String(ig9));
 const ig2 = (await db.query(`select items_required_from::text d from drivers where id = '${D6}'`)).rows[0].d;
 const igToday14 = (await db.query(`select ((now() at time zone 'America/Los_Angeles')::date + 14)::text d`)).rows[0].d;
 ok('D: 0650 applies twice; active driver backfilled to today + 14, not extended by a re-run', ig1 === igToday14 && ig2 === ig1, `${ig1} ${ig2} ${igToday14}`);

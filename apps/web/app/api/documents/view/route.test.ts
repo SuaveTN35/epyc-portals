@@ -33,6 +33,7 @@ vi.mock('@/lib/server/staff-session', () => ({
 }));
 
 const { GET } = await import('./route');
+const { oversizeHeic } = await import('../../../../lib/__fixtures__/heic-fixtures');
 
 let ip = 0;
 function req(path: string | null) {
@@ -64,6 +65,30 @@ describe('GET /api/documents/view', () => {
       expect(res.status).toBe(400);
     }
     expect(state.downloaded).toEqual([]);
+  });
+
+  it('refuses paths fetch would rewrite (dot segments, encoding, empty segments)', async () => {
+    for (const p of [
+      'drivers/P1/./vehicle_front-1.jpg',
+      'drivers/P1/z/%2e%2e/vehicle_front-1.jpg',
+      'drivers/P1/z/%2E%2E/vehicle_front-1.jpg',
+      'drivers//P1/vehicle_front-1.jpg',
+      'drivers/P1/vehicle_front-1.jpg/',
+      'drivers/P1/z/../vehicle_front-1.jpg',
+      'drivers\\P1\\vehicle_front-1.jpg',
+      'drivers/P1/vehicle_front-1.jpg\u0000',
+      'drivers/P1/vehicle%20front.jpg',
+    ]) {
+      const res = await GET(req(p));
+      expect(res.status, p).toBe(400);
+    }
+    expect(state.downloaded).toEqual([]);
+  });
+
+  it('refuses to decode a HEIC that declares more than the pixel cap', async () => {
+    state.file = oversizeHeic();
+    const res = await GET(req('vehicles/1-big.heic'));
+    expect(res.status).toBe(422);
   });
 
   it('shows a JPEG inline with a sandbox CSP', async () => {

@@ -7,6 +7,7 @@ import { NextRequest } from 'next/server';
 import { pacificToday } from '@/lib/driver-profile';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { oversizeHeic } from '@/lib/__fixtures__/heic-fixtures';
 
 type Op = [string, ...unknown[]];
 type Handler = (table: string, ops: Op[], terminal: string) => { data: unknown; error: unknown };
@@ -190,6 +191,14 @@ describe('upload: HEIC and ID badge timing', () => {
     expect((await upload(formReq({ item: 'vehicle_front', file: fake }))).status).toBe(400);
   });
 
+  it('refuses a HEIC that declares more than the pixel cap, before decoding', async () => {
+    const big = new Blob([new Uint8Array(oversizeHeic())], { type: 'image/heic' });
+    const res = await upload(formReq({ item: 'vehicle_front', file: big }));
+    expect(res.status).toBe(400);
+    expect((await res.json()).error).toMatch(/HEIC/);
+    expect(state.uploads).toEqual([]);
+  });
+
   it('refuses a HEIC that cannot be converted either, with a clear message (QA N4)', async () => {
     const heic = new Blob([new Uint8Array([0, 0, 0, 24])], { type: 'image/heic' });
     const res = await upload(formReq({ item: 'vehicle_front', file: heic }));
@@ -287,6 +296,19 @@ describe('POST /api/driver/profile/signed-urls', () => {
     }));
     expect(res.status).toBe(200);
     expect(state.signed.sort()).toEqual(['drivers/prof-1/a.jpg', 'insurance/legacy.jpg']);
+  });
+
+  it('never signs a path fetch would rewrite (AEQUALIS QA dot-segment cases)', async () => {
+    state.adminHandler = (t, _ops, term) => {
+      if (t === 'drivers' && term === 'maybeSingle') return { data: { id: 'drv-1' }, error: null };
+      if (t === 'driver_review_items') return { data: [], error: null };
+      return { data: null, error: null };
+    };
+    const res = await signedUrls(jsonReq('/api/driver/profile/signed-urls', {
+      paths: ['drivers/prof-1/./x.jpg', 'drivers/prof-1/z/%2e%2e/x.jpg', 'drivers/prof-1//x.jpg', '/drivers/prof-1/x.jpg', 'drivers/prof-1/ok.jpg'],
+    }));
+    expect(res.status).toBe(200);
+    expect(state.signed).toEqual(['drivers/prof-1/ok.jpg']);
   });
 });
 

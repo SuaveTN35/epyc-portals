@@ -11,12 +11,15 @@ import { heicToJpeg, HeicConvertError } from '@/lib/server/heic';
  * Staff only (admin / dispatcher, same check as the review route). Streams one
  * file from the private driver-documents bucket so the dispatch viewer can
  * show it on the page instead of downloading it (P-366).
- *   * The path must be in a known folder (same rule as signed-url).
+ *   * The path must be a plain storage path in a known folder (same rule as
+ *     signed-url): no ".", "..", "%", or empty segments that fetch would
+ *     rewrite into a different file.
  *   * The type is read from the file's first bytes, never from its name or
  *     stored content type. Only JPEG, PNG, GIF, WEBP, PDF, and HEIC are
  *     served; anything else is refused (415), so an uploaded HTML or SVG can
  *     never run on this origin.
- *   * iPhone HEIC / HEIF is converted to JPEG on the fly.
+ *   * iPhone HEIC / HEIF is converted to JPEG on the fly, only after its
+ *     declared size passes the pixel cap (heicToJpeg).
  *   * Always Content-Disposition: inline; images also get a sandbox CSP.
  */
 
@@ -62,7 +65,12 @@ export async function GET(request: NextRequest) {
     'Cache-Control': 'private, max-age=300',
     'X-Content-Type-Options': 'nosniff',
   };
-  // Chrome's PDF viewer does not run under a sandbox CSP; images do.
+  // PDFs get no sandbox CSP (AEQUALIS QA item 4, decided 2026-10-28): Chrome
+  // does not render a PDF whose response carries a CSP sandbox, and adding
+  // "allow-scripts allow-same-origin" to make it render would cancel the
+  // sandbox for a same-origin document anyway. A PDF is served only when its
+  // bytes start with %PDF, as application/pdf with nosniff, to staff only,
+  // so the browser hands it to its PDF viewer and never runs it as a page.
   if (kind !== 'pdf') headers['Content-Security-Policy'] = "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox";
 
   return new NextResponse(Buffer.from(bytes), { status: 200, headers });

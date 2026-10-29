@@ -9,8 +9,8 @@
 -- after this ships get no grace.
 --
 -- drivers.items_required_from date: the Pacific date from which the items
--- rule applies. Backfilled to (Pacific today) + 14 for active drivers with no
--- date; NULL means no grace. Same style and same start rule as
+-- rule applies. Backfilled once, when the column is added, to (Pacific today)
+-- + 14 for active drivers; NULL means no grace. Same style and same start rule as
 -- drivers.selfie_required_from in 20261028000700 (both: Pacific date of
 -- apply + 14, NULL = no grace, drivers cannot set or change it).
 --
@@ -22,16 +22,27 @@
 -- skipped while items_required_from > today. guard_driver_profile_fields():
 -- the 0500 body plus the items_required_from guard.
 --
--- ADDITIVE / SAFE TO RE-RUN: ADD COLUMN IF NOT EXISTS, CREATE OR REPLACE.
--- The backfill only fills NULLs, so a re-run does not extend anyone's date.
+-- ADDITIVE / SAFE TO RE-RUN: the column and its one-time backfill are added
+-- together only when the column does not exist yet; CREATE OR REPLACE for the
+-- functions. A re-run changes no driver's date.
 -- Rollback: re-run 20261028000600 (rule without grace) and the
 -- guard_driver_profile_fields section of 20261028000500.
 
-ALTER TABLE public.drivers ADD COLUMN IF NOT EXISTS items_required_from date;
-
-UPDATE public.drivers
-   SET items_required_from = (now() at time zone 'America/Los_Angeles')::date + 14
- WHERE status = 'active' AND items_required_from IS NULL;
+-- One time only (AEQUALIS QA): the grace backfill runs in the same step that
+-- adds the column. A re-run finds the column and does nothing, so a driver
+-- approved after the first apply (NULL = no grace) never gets a grace date.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = 'drivers' AND column_name = 'items_required_from'
+  ) THEN
+    ALTER TABLE public.drivers ADD COLUMN items_required_from date;
+    UPDATE public.drivers
+       SET items_required_from = (now() at time zone 'America/Los_Angeles')::date + 14
+     WHERE status = 'active';
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.guard_driver_profile_fields()
 RETURNS trigger

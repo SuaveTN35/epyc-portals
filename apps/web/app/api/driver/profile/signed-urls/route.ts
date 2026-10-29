@@ -3,6 +3,7 @@ import { createClient as createSessionClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/server/driver-session';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { isOwnUploadPath } from '@/lib/driver-profile';
+import { isSafeStoragePath } from '@/lib/server/document-paths';
 import { PROFILE_ITEMS } from '@/lib/driver-profile-items';
 
 /**
@@ -11,8 +12,9 @@ import { PROFILE_ITEMS } from '@/lib/driver-profile-items';
  * Short-lived signed URLs so a driver can see their own photos. A path is
  * signed only if it is in the caller's own folder (drivers/<user id>/...) or
  * is exactly a file already recorded on the caller's own drivers row or
- * review rows (older uploads live in shared folders). Anything else is
- * silently left out of the answer.
+ * review rows (older uploads live in shared folders). Every path must also
+ * be a plain storage path (isSafeStoragePath: no ".", "..", "%", or empty
+ * segments, which fetch would rewrite). Anything else is silently left out.
  */
 const EXPIRY_SECONDS = 300;
 const MAX_PATHS = 20;
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest) {
   }
 
   const allowed = (paths as string[]).filter(
-    (p) => !p.includes('..') && (isOwnUploadPath(p, user.id) || onRecord.has(p))
+    (p) => isSafeStoragePath(p) && (isOwnUploadPath(p, user.id) || onRecord.has(p))
   );
   if (allowed.length === 0) return NextResponse.json({ urls: {} });
 
