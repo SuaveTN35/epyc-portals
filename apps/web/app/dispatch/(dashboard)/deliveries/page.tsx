@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { requestAssignedText } from '@/lib/sms-client';
+import { requestAssignedText, requestClientAlert } from '@/lib/sms-client';
 import { loadDriverReadiness } from '@/lib/driver-readiness';
 import { activeJobDriverIds, isActiveJobStatus, loadLapsedInsuranceDrivers } from '@/lib/insurance-alerts';
 import { InsuranceLapsedFlag } from '@/components/dispatch/InsuranceLapsedFlag';
@@ -260,6 +260,8 @@ export default function DeliveriesPage() {
 
     // Text the driver now on the job, if they opted in to SMS.
     requestAssignedText(selectedDelivery.id);
+    // Text and email the client that a driver is assigned.
+    requestClientAlert(selectedDelivery.id);
 
     // A direct assignment closes any open offers for this job.
     await supabase

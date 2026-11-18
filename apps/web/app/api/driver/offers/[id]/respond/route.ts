@@ -3,6 +3,7 @@ import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-lim
 import { getCallerDriver } from '@/lib/server/driver-session';
 import { evaluateOfferResponse, parseOfferAction } from '@/lib/job-offers';
 import { blockedAcceptMessage, loadOfferBlockReason } from '@/lib/server/driver-eligibility';
+import { notifyClient } from '@/lib/server/client-alerts';
 
 /**
  * POST /api/driver/offers/:id/respond   body: { action: 'accept' | 'decline' }
@@ -144,6 +145,10 @@ export async function POST(
   if (failed.length > 0) {
     console.error('offer accept follow-up failed', { offerId, deliveryId, failed });
   }
+
+  // Text and email the client that a driver is assigned. notifyClient never
+  // throws and sends at most once per job, so this cannot undo the accept.
+  await notifyClient(admin, deliveryId);
 
   return NextResponse.json({ ok: true, action, delivery_id: deliveryId, warnings: failed });
 }

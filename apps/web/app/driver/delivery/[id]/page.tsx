@@ -36,6 +36,7 @@ import {
 } from '@/lib/proof-flow';
 import { ProofPhotoCapture, type CapturedPhoto } from '@/components/driver/ProofPhotoCapture';
 import { OfflineBanner } from '@/components/driver/OfflineBanner';
+import { requestClientAlert } from '@/lib/sms-client';
 import { CopyButton } from '@/components/driver/CopyButton';
 import { JobDetailsCard } from '@/components/driver/JobDetailsCard';
 import { ReleaseJobSheet } from '@/components/driver/ReleaseJobSheet';
@@ -829,6 +830,8 @@ function PickupProofPanel({
       setError(`Proof saved, but marking the job picked up failed: ${statusError.message}. Tap again or call dispatch.`);
       return;
     }
+    // Text and email the client that the package was picked up.
+    requestClientAlert(deliveryId);
     onDone();
   };
 
@@ -983,6 +986,9 @@ function DropoffProofPanel({
       setError(`Proof saved, but marking the job delivered failed: ${statusError.message}. Tap again or call dispatch.`);
       return;
     }
+
+    // Text and email the client that the package was delivered.
+    requestClientAlert(deliveryId);
 
     // Free the driver for the next job.
     const { data: { user } } = await supabase.auth.getUser();

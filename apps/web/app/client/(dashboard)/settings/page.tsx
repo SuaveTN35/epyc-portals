@@ -73,7 +73,7 @@ export default async function SettingsPage() {
             <NotificationPreferences
               initialPreferences={{
                 email_delivery_updates: profile?.email_notifications ?? true,
-                sms_delivery_updates: profile?.sms_notifications ?? true,
+                sms_delivery_updates: profile?.sms_opt_in === true,
                 email_marketing: profile?.marketing_emails ?? false,
               }}
             />
