@@ -14,6 +14,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
     { path: '/services/medical', priority: 0.9, changeFrequency: 'monthly' },
     { path: '/services/legal', priority: 0.9, changeFrequency: 'monthly' },
     { path: '/services/commercial', priority: 0.9, changeFrequency: 'monthly' },
+    { path: '/request-delivery', priority: 0.9, changeFrequency: 'monthly' },
     { path: '/contact', priority: 0.8, changeFrequency: 'monthly' },
     { path: '/about', priority: 0.7, changeFrequency: 'monthly' },
     { path: '/careers', priority: 0.6, changeFrequency: 'weekly' },

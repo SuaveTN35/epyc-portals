@@ -69,6 +69,7 @@ export async function POST(request: NextRequest) {
       'insurance',
       'registration',
       'vehicles',
+      'resumes',
     ];
     if (!allowedPaths.includes(path)) {
       return NextResponse.json(

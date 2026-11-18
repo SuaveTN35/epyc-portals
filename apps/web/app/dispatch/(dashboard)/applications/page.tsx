@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Clock,
 } from 'lucide-react';
+import { VAN_ACCESS, EXPERIENCE, AVAILABILITY, labelFor } from '@/lib/public-requests';
 
 interface DriverApplication {
   id: string;
@@ -28,6 +29,11 @@ interface DriverApplication {
   notes: string | null;
   contacted_at: string | null;
   created_at: string;
+  // Added 2026-11-18 (migration 20261118000000); absent until it is applied.
+  van_access?: string | null;
+  years_experience?: string | null;
+  availability?: string | null;
+  resume_path?: string | null;
 }
 
 const STATUS_OPTIONS = [
@@ -337,6 +343,14 @@ export default function DriverApplicationsPage() {
                       </p>
                     </div>
 
+                    {(a.van_access || a.years_experience || a.availability) && (
+                      <ul className="mt-2 text-xs text-gray-700 space-y-0.5">
+                        {a.van_access && <li><span className="text-gray-400">Van:</span> {labelFor(VAN_ACCESS, a.van_access)}</li>}
+                        {a.years_experience && <li><span className="text-gray-400">Experience:</span> {labelFor(EXPERIENCE, a.years_experience)}</li>}
+                        {a.availability && <li><span className="text-gray-400">Availability:</span> {labelFor(AVAILABILITY, a.availability)}</li>}
+                      </ul>
+                    )}
+
                     {a.notes && (
                       <p className="mt-2 text-xs text-gray-500 italic max-w-lg">{a.notes}</p>
                     )}
@@ -348,6 +362,7 @@ export default function DriverApplicationsPage() {
                         { label: 'Photo', path: a.profile_photo_path },
                         { label: 'License Front', path: a.license_front_path },
                         { label: 'License Back', path: a.license_back_path },
+                        { label: 'Resume', path: a.resume_path ?? null },
                       ].map((doc) => (
                         <button
                           key={doc.label}

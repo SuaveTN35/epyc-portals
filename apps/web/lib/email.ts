@@ -136,8 +136,20 @@ export function opsNewApplicationAlert(a: {
   fullName: string | null;
   email: string;
   phone: string | null;
+  /** Screening answers, already turned into readable labels. */
+  answers?: Array<[string, string]>;
+  hasResume?: boolean;
 }) {
   const name = a.fullName?.trim() || '(no name given)';
+  const answers = (a.answers || []).filter(([, v]) => v);
+  const answerRows = answers
+    .map(
+      ([k, v]) =>
+        `<tr><td style="padding:6px 0;color:#78838f;width:90px;vertical-align:top;">${escapeHtml(k)}</td><td style="padding:6px 0;font-weight:600;">${escapeHtml(v)}</td></tr>`
+    )
+    .join('');
+  const answerText = answers.map(([k, v]) => `${(k + ':').padEnd(12)} ${v}`).join('\n');
+  const resumeLine = a.hasResume ? 'A resume was attached.' : 'No resume attached.';
 
   const html = shell(`
     <p style="margin:0 0 6px;font-size:12px;letter-spacing:1px;color:#78838f;font-weight:700;">NEW DRIVER APPLICATION</p>
@@ -145,8 +157,9 @@ export function opsNewApplicationAlert(a: {
     <table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;">
       <tr><td style="padding:6px 0;color:#78838f;width:90px;">Phone</td><td style="padding:6px 0;font-weight:600;">${escapeHtml(a.phone || 'not provided')}</td></tr>
       <tr><td style="padding:6px 0;color:#78838f;">Email</td><td style="padding:6px 0;font-weight:600;">${escapeHtml(a.email)}</td></tr>
+      ${answerRows}
     </table>
-    <p style="margin:18px 0 0;">Profile photo and both sides of the driver's license were uploaded. Review the application in the dispatch queue.</p>
+    <p style="margin:18px 0 0;">Both sides of the driver's license were uploaded. ${resumeLine} Review the application in the dispatch queue.</p>
     <p style="margin:14px 0 0;color:#78838f;font-size:13px;">Applicants who wait more than two days usually take other work. Call early.</p>
   `);
 
@@ -155,13 +168,177 @@ export function opsNewApplicationAlert(a: {
 Name:  ${name}
 Phone: ${a.phone || 'not provided'}
 Email: ${a.email}
-
-Profile photo and both sides of the driver's license were uploaded.
+${answerText ? answerText + '\n' : ''}
+Both sides of the driver's license were uploaded. ${resumeLine}
 Review the application in the dispatch queue.
 
 Applicants who wait more than two days usually take other work. Call early.`;
 
   return { subject: `New driver application: ${name}`, html, text };
+}
+
+function detailTable(rows: Array<[string, string | null | undefined]>): string {
+  return `<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;font-size:14px;">${rows
+    .filter(([, v]) => v)
+    .map(
+      ([k, v]) =>
+        `<tr><td style="padding:6px 12px 6px 0;color:#78838f;width:110px;vertical-align:top;">${escapeHtml(k)}</td><td style="padding:6px 0;font-weight:600;white-space:pre-wrap;">${escapeHtml(String(v))}</td></tr>`
+    )
+    .join('')}</table>`;
+}
+
+function detailText(rows: Array<[string, string | null | undefined]>): string {
+  return rows
+    .filter(([, v]) => v)
+    .map(([k, v]) => `${(k + ':').padEnd(14)} ${v}`)
+    .join('\n');
+}
+
+export interface DeliveryRequestEmailData {
+  reference: string;
+  contactName: string;
+  contactPhone: string;
+  contactEmail: string;
+  companyName: string | null;
+  pickupAddress: string;
+  dropoffAddress: string;
+  itemType: string;
+  itemDescription: string | null;
+  serviceLevel: string;
+  pickupDate: string | null;
+  timeWindow: string | null;
+  notes: string | null;
+  saved: boolean;
+}
+
+function deliveryRows(d: DeliveryRequestEmailData): Array<[string, string | null]> {
+  return [
+    ['Reference', d.reference],
+    ['Name', d.contactName],
+    ['Company', d.companyName],
+    ['Phone', d.contactPhone],
+    ['Email', d.contactEmail],
+    ['Pickup', d.pickupAddress],
+    ['Drop-off', d.dropoffAddress],
+    ['Item', d.itemType],
+    ['Description', d.itemDescription],
+    ['When', d.serviceLevel],
+    ['Date', d.pickupDate],
+    ['Time window', d.timeWindow],
+    ['Notes', d.notes],
+  ];
+}
+
+/** Internal alert for a delivery request from the public site. */
+export function opsNewDeliveryRequest(d: DeliveryRequestEmailData) {
+  const savedNote = d.saved
+    ? 'It is also in the dispatch portal under Requests.'
+    : 'It could NOT be saved to the database, so this email is the only copy.';
+  const html = shell(`
+    <p style="margin:0 0 6px;font-size:12px;letter-spacing:1px;color:#78838f;font-weight:700;">NEW DELIVERY REQUEST</p>
+    <p style="margin:0 0 18px;font-size:20px;font-weight:700;color:#0b1f3a;">${escapeHtml(d.contactName)}</p>
+    ${detailTable(deliveryRows(d))}
+    <p style="margin:18px 0 0;">Call the customer to confirm the price and book it. ${escapeHtml(savedNote)}</p>
+  `);
+  const text = `NEW DELIVERY REQUEST
+
+${detailText(deliveryRows(d))}
+
+Call the customer to confirm the price and book it. ${savedNote}`;
+  return { subject: `Delivery request ${d.reference}: ${d.contactName}`, html, text };
+}
+
+/** Acknowledgement to the person who asked for a delivery. */
+export function customerRequestAcknowledgement(d: DeliveryRequestEmailData) {
+  const first = d.contactName.trim().split(' ')[0] || 'there';
+  const rows: Array<[string, string | null]> = [
+    ['Reference', d.reference],
+    ['Pickup', d.pickupAddress],
+    ['Drop-off', d.dropoffAddress],
+    ['Item', d.itemType],
+    ['When', d.serviceLevel],
+    ['Date', d.pickupDate],
+    ['Time window', d.timeWindow],
+  ];
+  const html = shell(`
+    <p style="margin:0 0 14px;">Hi ${escapeHtml(first)},</p>
+    <p style="margin:0 0 14px;">Thanks for your delivery request. A dispatcher will call you shortly to confirm the price and pickup time. Nothing is booked or charged until you confirm.</p>
+    ${detailTable(rows)}
+    <p style="margin:18px 0 14px;">If it is urgent, call us at
+      <a href="tel:8182170070" style="color:${BRAND_GREEN};font-weight:600;text-decoration:none;">(818) 217-0070</a> and give your reference.</p>
+    <p style="margin:0;">Thank you,<br><strong>Epyc Courier Service</strong></p>
+  `);
+  const text = `Hi ${first},
+
+Thanks for your delivery request. A dispatcher will call you shortly to confirm the price and pickup time. Nothing is booked or charged until you confirm.
+
+${detailText(rows)}
+
+If it is urgent, call us at (818) 217-0070 and give your reference.
+
+Thank you,
+Epyc Courier Service
+UDIG Solutions Inc. dba Epyc Courier Service
+Los Angeles, CA | (818) 217-0070 | epyccs.com`;
+  return { subject: `We received your delivery request (${d.reference})`, html, text };
+}
+
+export interface ContactEmailData {
+  fullName: string;
+  email: string;
+  phone: string | null;
+  subject: string;
+  message: string;
+  saved: boolean;
+}
+
+/** Internal alert for a message from the /contact form. */
+export function opsNewContactMessage(m: ContactEmailData) {
+  const rows: Array<[string, string | null]> = [
+    ['Name', m.fullName],
+    ['Email', m.email],
+    ['Phone', m.phone],
+    ['Subject', m.subject],
+    ['Message', m.message],
+  ];
+  const savedNote = m.saved
+    ? 'It is also in the dispatch portal under Requests.'
+    : 'It could NOT be saved to the database, so this email is the only copy.';
+  const html = shell(`
+    <p style="margin:0 0 6px;font-size:12px;letter-spacing:1px;color:#78838f;font-weight:700;">NEW WEBSITE MESSAGE</p>
+    <p style="margin:0 0 18px;font-size:20px;font-weight:700;color:#0b1f3a;">${escapeHtml(m.fullName)}</p>
+    ${detailTable(rows)}
+    <p style="margin:18px 0 0;">Reply to this email to answer them directly. ${escapeHtml(savedNote)}</p>
+  `);
+  const text = `NEW WEBSITE MESSAGE
+
+${detailText(rows)}
+
+Reply to this email to answer them directly. ${savedNote}`;
+  return { subject: `Website message (${m.subject}): ${m.fullName}`, html, text };
+}
+
+/** Acknowledgement to the person who used the /contact form. */
+export function contactAcknowledgement(m: ContactEmailData) {
+  const first = m.fullName.trim().split(' ')[0] || 'there';
+  const html = shell(`
+    <p style="margin:0 0 14px;">Hi ${escapeHtml(first)},</p>
+    <p style="margin:0 0 14px;">Thanks for reaching out to Epyc Courier Service. We received your message and will get back to you soon.</p>
+    <p style="margin:0 0 14px;">If you need a delivery right away, call us at
+      <a href="tel:8182170070" style="color:${BRAND_GREEN};font-weight:600;text-decoration:none;">(818) 217-0070</a>.</p>
+    <p style="margin:0;">Thank you,<br><strong>Epyc Courier Service</strong></p>
+  `);
+  const text = `Hi ${first},
+
+Thanks for reaching out to Epyc Courier Service. We received your message and will get back to you soon.
+
+If you need a delivery right away, call us at (818) 217-0070.
+
+Thank you,
+Epyc Courier Service
+UDIG Solutions Inc. dba Epyc Courier Service
+Los Angeles, CA | (818) 217-0070 | epyccs.com`;
+  return { subject: 'We received your message', html, text };
 }
 
 function escapeHtml(s: string): string {

@@ -184,6 +184,27 @@ toll-free verification instead. Registration review time is set by Twilio and th
 
 Migration: `packages/supabase/migrations/20261028000300_sms_alerts.sql`.
 
+### Public forms (no account needed, added 2026-11-18)
+
+- **Request a Delivery**: on the home page (`/#quote`) and at `/request-delivery`. Posts to
+  `POST /api/public/delivery-request`.
+- **Send Us a Message**: on `/contact` (replaces the old `mailto:` form). Posts to
+  `POST /api/public/contact`.
+- Both save to Supabase with the service role (`delivery_requests`, `contact_messages`) and
+  email the ops inbox through Resend, with reply-to set to the visitor, plus a short
+  acknowledgement to the visitor. A request counts as received if it was saved OR the ops
+  email went out; only when both fail does the visitor see an error with the phone number.
+- Staff see and work both lists at **Dispatch -> Requests** (`/dispatch/requests`).
+- Spam guard: hidden honeypot field and 5 submissions per 10 minutes per IP.
+- Needs migration `packages/supabase/migrations/20261118000000_public_requests.sql` and these
+  env vars: `SUPABASE_SERVICE_ROLE_KEY`, `RESEND_API_KEY` (domain epyccs.com verified in Resend),
+  optional `EPYC_OPS_EMAIL` (default admin@epyccs.com) and `EPYC_MAIL_FROM`.
+
+The driver application (`/driver/register`) also asks about cargo van access, courier experience
+and availability, and takes an optional resume (PDF or photo, stored under `resumes/` in the
+private driver-documents bucket). Answers show on **Dispatch -> Applications** once the same
+migration is applied.
+
 ### Dispatch Portal
 - Real-time delivery dashboard
 - Driver management and approval

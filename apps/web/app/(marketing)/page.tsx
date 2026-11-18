@@ -17,6 +17,7 @@ import {
   Calendar,
   Zap,
 } from 'lucide-react';
+import DeliveryRequestForm from '@/components/public/DeliveryRequestForm';
 
 export default function HomePage() {
   return (
@@ -55,7 +56,7 @@ export default function HomePage() {
             {/* CTAs */}
             <div className="flex flex-col sm:flex-row gap-4">
               <Link href="#quote" className="btn btn-primary btn-lg bg-white text-epyc-primary hover:bg-gray-100">
-                Get Instant Quote
+                Request a Delivery
               </Link>
               <a href="tel:8182170070" className="btn btn-secondary btn-lg border-white text-white hover:bg-white/10">
                 <Phone className="mr-2 h-5 w-5" />
@@ -367,29 +368,15 @@ export default function HomePage() {
         <div className="max-w-3xl mx-auto px-4">
           <div className="text-center mb-8">
             <h2 className="text-3xl lg:text-4xl font-bold text-gray-900 mb-4">
-              Get an Instant Quote
+              Request a Delivery
             </h2>
             <p className="text-lg text-gray-600">
-              Tell us about your delivery needs and we'll provide a competitive quote.
+              Tell us where it is going and when. A dispatcher calls you back to confirm the price and pickup time.
             </p>
           </div>
 
-          <div className="card p-8">
-            <div className="text-center py-8">
-              <Truck className="h-16 w-16 text-epyc-primary mx-auto mb-4" />
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Ready to Get Started?</h3>
-              <p className="text-gray-600 mb-6">
-                Create a client account to book deliveries, get quotes, and track packages online.
-              </p>
-              <div className="flex flex-col sm:flex-row gap-4 justify-center">
-                <Link href="/client/register" className="btn btn-primary">
-                  Create Client Account
-                </Link>
-                <a href="tel:8182170070" className="btn btn-secondary">
-                  Call for Quote
-                </a>
-              </div>
-            </div>
+          <div className="card p-6 sm:p-8">
+            <DeliveryRequestForm />
           </div>
         </div>
       </section>
