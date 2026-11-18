@@ -1,14 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createAdminClient } from '@/lib/server/supabase-admin';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { extensionForContentType } from '@/lib/upload-ext';
 import { isHeicBytes } from '@/lib/document-sniff';
 import { heicToJpeg } from '@/lib/server/heic';
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
 
 export async function POST(request: NextRequest) {
   try {
@@ -97,6 +92,15 @@ export async function POST(request: NextRequest) {
     const fileExt = extensionForContentType(storedType);
     const fileName = `${path}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${fileExt}`;
 
+    // Created per request so a build without the service key (for example a
+    // Vercel preview) still succeeds; the route then answers 503.
+    const supabaseAdmin = createAdminClient();
+    if (!supabaseAdmin) {
+      return NextResponse.json(
+        { error: 'Uploads are not available right now. Please try again later.' },
+        { status: 503 }
+      );
+    }
     const { error: uploadError } = await supabaseAdmin.storage
       .from('driver-documents')
       .upload(fileName, buffer, {
