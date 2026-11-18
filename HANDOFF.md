@@ -20,9 +20,9 @@ Branch: claude/public-requests-and-driver-apply (PR #1, open, not merged)
 - Checks: 362 vitest tests pass, tsc clean, next build passes.
 
 ## Open
-- Vercel preview for PR #1 failed. main fails the same way when
-  SUPABASE_SERVICE_ROLE_KEY is missing, so the preview environment most likely
-  lacks that key. Logs not read (no Vercel access from Duet).
+- Vercel preview for PR #1 now builds (link is on the PR). Until
+  SUPABASE_SERVICE_ROLE_KEY and RESEND_API_KEY are set for Preview, the preview
+  forms cannot save or email. Preview not opened from Duet (no access).
 - packages/supabase/tests/public_requests.pglite.mjs is written but not run.
 
 ## Before merging (Rico)
