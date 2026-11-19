@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { deliveryRequestSchema, contactMessageSchema, fieldErrors } from './public-requests';
-import { opsNewDeliveryRequest, customerRequestAcknowledgement, opsNewContactMessage, opsNewApplicationAlert } from './email';
+import {
+  opsNewDeliveryRequest,
+  customerRequestAcknowledgement,
+  contactAcknowledgement,
+  opsNewContactMessage,
+  opsNewApplicationAlert,
+} from './email';
 
 const goodRequest = {
   contact_name: 'Pat Lee',
@@ -91,6 +97,32 @@ describe('request emails', () => {
 
   it('acknowledgement promises no booking or charge', () => {
     expect(customerRequestAcknowledgement(data).text).toContain('Nothing is booked or charged');
+  });
+
+  it('acknowledgements carry no visitor free text (anti-abuse)', () => {
+    const evil = 'Visit evil.example now';
+    const d = {
+      ...data,
+      contactName: evil,
+      pickupAddress: evil,
+      dropoffAddress: evil,
+      timeWindow: evil,
+      notes: evil,
+      itemDescription: evil,
+      companyName: evil,
+    };
+    const ack = customerRequestAcknowledgement(d);
+    expect(ack.text + ack.html + ack.subject).not.toContain('evil.example');
+    expect(ack.text).toContain(data.reference);
+    const c = contactAcknowledgement({ fullName: evil, email: 's@x.com', phone: null, subject: evil, message: evil, saved: true });
+    expect(c.text + c.html + c.subject).not.toContain('evil.example');
+  });
+
+  it('alert subjects never contain line breaks', () => {
+    const e = opsNewContactMessage({ fullName: 'Sam\r\nBcc: x@y.com', email: 's@x.com', phone: null, subject: 'Support', message: 'hi', saved: true });
+    expect(/[\r\n]/.test(e.subject)).toBe(false);
+    const r = opsNewDeliveryRequest({ ...data, contactName: 'Pat\nX' });
+    expect(/[\r\n]/.test(r.subject)).toBe(false);
   });
 
   it('contact alert includes the message', () => {
