@@ -6,6 +6,7 @@ import {
   contactAcknowledgement,
   opsNewContactMessage,
   opsNewApplicationAlert,
+  applicantAcknowledgement,
 } from './email';
 
 const goodRequest = {
@@ -123,6 +124,13 @@ describe('request emails', () => {
     expect(/[\r\n]/.test(e.subject)).toBe(false);
     const r = opsNewDeliveryRequest({ ...data, contactName: 'Pat\nX' });
     expect(/[\r\n]/.test(r.subject)).toBe(false);
+  });
+
+  it('driver acknowledgement is fixed text and alert subject is one line', () => {
+    const ack = applicantAcknowledgement();
+    expect(ack.text.startsWith('Hello,')).toBe(true);
+    const e = opsNewApplicationAlert({ fullName: 'Ana\r\nBcc: x@y.com', email: 'a@x.com', phone: null });
+    expect(/[\r\n]/.test(e.subject)).toBe(false);
   });
 
   it('contact alert includes the message', () => {

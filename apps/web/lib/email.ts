@@ -92,12 +92,15 @@ function shell(bodyHtml: string): string {
 </body></html>`;
 }
 
-/** Acknowledgement sent to the applicant the moment they submit. */
-export function applicantAcknowledgement(fullName: string | null) {
-  const name = (fullName || '').trim().split(' ')[0] || 'there';
-
+/**
+ * Acknowledgement sent to the applicant the moment they submit.
+ * The route is public and this goes to the address the visitor typed, so it
+ * carries fixed text only, no visitor input (same rule as the request and
+ * contact acknowledgements).
+ */
+export function applicantAcknowledgement() {
   const html = shell(`
-    <p style="margin:0 0 14px;">Hi ${escapeHtml(name)},</p>
+    <p style="margin:0 0 14px;">Hello,</p>
     <p style="margin:0 0 14px;">We received your driver application and your documents came through. Thank you for applying to drive with Epyc.</p>
     <p style="margin:0 0 8px;font-weight:600;">What happens next</p>
     <ol style="margin:0 0 16px;padding-left:20px;">
@@ -111,7 +114,7 @@ export function applicantAcknowledgement(fullName: string | null) {
     <p style="margin:0;">Thanks for your interest,<br><strong>Epyc Courier Service</strong></p>
   `);
 
-  const text = `Hi ${name},
+  const text = `Hello,
 
 We received your driver application and your documents came through. Thank you for applying to drive with Epyc.
 
@@ -174,7 +177,7 @@ Review the application in the dispatch queue.
 
 Applicants who wait more than two days usually take other work. Call early.`;
 
-  return { subject: `New driver application: ${name}`, html, text };
+  return { subject: `New driver application: ${oneLine(name)}`, html, text };
 }
 
 function detailTable(rows: Array<[string, string | null | undefined]>): string {
