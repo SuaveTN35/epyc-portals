@@ -8,6 +8,7 @@ import {
 } from '@/lib/email';
 import { getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
 import { checkDurableRateLimit } from '@/lib/server/durable-rate-limit';
+import { verifyTurnstile, tokenFrom } from '@/lib/server/turnstile';
 import { VAN_ACCESS, EXPERIENCE, AVAILABILITY, labelFor } from '@/lib/public-requests';
 
 /**
@@ -39,9 +40,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'rate_limited' }, { status: 429 });
   }
 
+  let raw: unknown;
+  try {
+    raw = await request.json();
+  } catch {
+    return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
+  }
+
+  const human = await verifyTurnstile(tokenFrom(raw), getClientIdentifier(request));
+  if (!human.ok) {
+    return NextResponse.json({ ok: false, error: 'captcha_failed' }, { status: 403 });
+  }
+
   let payload: z.infer<typeof schema>;
   try {
-    payload = schema.parse(await request.json());
+    payload = schema.parse(raw);
   } catch {
     return NextResponse.json({ ok: false, error: 'invalid_payload' }, { status: 400 });
   }
