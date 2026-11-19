@@ -8,12 +8,15 @@ import { createClient } from '@/lib/supabase/client';
 import { Mail, Lock, User, Phone, ArrowRight, Loader2, Car, CheckCircle, Camera, CreditCard, Upload, X } from 'lucide-react';
 import { uploadDriverDocument, isImageFile, isPdfFile } from '@/lib/upload-client';
 import { VAN_ACCESS, EXPERIENCE, AVAILABILITY } from '@/lib/public-requests';
+import Turnstile, { TURNSTILE_SITE_KEY } from '@/components/public/Turnstile';
 
 function RegisterForm() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaRound, setCaptchaRound] = useState(0);
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
 
   const profilePhotoRef = useRef<HTMLInputElement>(null);
@@ -211,6 +214,7 @@ function RegisterForm() {
             years_experience: formData.years_experience,
             availability: formData.availability,
             has_resume: !!resumePath,
+            turnstile_token: captcha,
           }),
         });
       } catch (notifyErr) {
@@ -221,6 +225,9 @@ function RegisterForm() {
     } catch (err) {
       setError(err instanceof Error ? err.message : 'An error occurred during registration');
       setLoading(false);
+      // Tokens are single use; get a fresh one before the next try.
+      setCaptcha(null);
+      setCaptchaRound((n) => n + 1);
     }
   };
 
@@ -594,9 +601,11 @@ function RegisterForm() {
           </div>
         </div>
 
+        <Turnstile onToken={setCaptcha} resetKey={captchaRound} />
+
         <button
           type="submit"
-          disabled={loading}
+          disabled={loading || (!!TURNSTILE_SITE_KEY && !captcha)}
           className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-base font-medium text-white bg-epyc-primary hover:bg-epyc-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-epyc-primary disabled:opacity-50 disabled:cursor-not-allowed touch-target"
         >
           {loading ? (

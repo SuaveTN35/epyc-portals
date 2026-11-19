@@ -75,6 +75,20 @@ describe('POST /api/public/delivery-request', () => {
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects with 403 and saves nothing when the captcha is on and the token is missing', async () => {
+    vi.stubEnv('TURNSTILE_SECRET_KEY', 'test-secret');
+    try {
+      const { POST } = await import('./route');
+      const res = await POST(req(body));
+      expect(res.status).toBe(403);
+      expect((await res.json()).captcha).toBe(true);
+      expect(insertSingle).not.toHaveBeenCalled();
+      expect(sendEmail).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('stores nothing for a bot that fills the honeypot', async () => {
     const { POST } = await import('./route');
     const res = await POST(req({ ...body, website: 'spam' }));

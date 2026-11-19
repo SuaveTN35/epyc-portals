@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle, Loader2, Send } from 'lucide-react';
+import Turnstile, { TURNSTILE_SITE_KEY } from '@/components/public/Turnstile';
 import { ITEM_TYPES, SERVICE_LEVELS } from '@/lib/public-requests';
 
 const inputClass =
@@ -35,6 +36,8 @@ export default function DeliveryRequestForm() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [formError, setFormError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [captcha, setCaptcha] = useState<string | null>(null);
+  const [captchaRound, setCaptchaRound] = useState(0);
   const [reference, setReference] = useState<string | null>(null);
 
   const set = (name: Field) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
@@ -51,7 +54,7 @@ export default function DeliveryRequestForm() {
       const res = await fetch('/api/public/delivery-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, turnstile_token: captcha }),
       });
       const data = (await res.json().catch(() => ({}))) as {
         ok?: boolean;
@@ -70,6 +73,9 @@ export default function DeliveryRequestForm() {
       setFormError('Could not connect. Check your signal and try again, or call (818) 217-0070.');
     } finally {
       setLoading(false);
+      // Turnstile tokens are single use; get a fresh one for the next try.
+      setCaptcha(null);
+      setCaptchaRound((n) => n + 1);
     }
   };
 
@@ -229,7 +235,8 @@ export default function DeliveryRequestForm() {
         <input id="dr-website" name="website" tabIndex={-1} autoComplete="off" value={form.website} onChange={set('website')} />
       </div>
 
-      <button type="submit" disabled={loading} className="w-full btn btn-primary btn-lg inline-flex justify-center items-center">
+      <Turnstile onToken={setCaptcha} resetKey={captchaRound} />
+      <button type="submit" disabled={loading || (!!TURNSTILE_SITE_KEY && !captcha)} className="w-full btn btn-primary btn-lg inline-flex justify-center items-center">
         {loading ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <Send className="h-5 w-5 mr-2" />}
         {loading ? 'Sending...' : 'Request Delivery'}
       </button>

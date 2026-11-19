@@ -17,6 +17,7 @@ import {
 } from '@/lib/email';
 import { getClientIdentifier } from '@/lib/rate-limit';
 import { checkDurableRateLimit } from '@/lib/server/durable-rate-limit';
+import { verifyTurnstile, tokenFrom } from '@/lib/server/turnstile';
 
 /**
  * "Request a delivery" from the public site, no account needed.
@@ -44,6 +45,14 @@ export async function POST(request: NextRequest) {
     body = await request.json();
   } catch {
     return NextResponse.json({ ok: false, error: 'Invalid request' }, { status: 400 });
+  }
+
+  const human = await verifyTurnstile(tokenFrom(body), getClientIdentifier(request));
+  if (!human.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Please complete the security check and try again, or call (818) 217-0070.', captcha: true },
+      { status: 403 }
+    );
   }
 
   const parsed = deliveryRequestSchema.safeParse(body);
