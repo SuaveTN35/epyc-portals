@@ -19,12 +19,14 @@ import {
   X,
   Bell,
   ChevronDown,
+  Inbox,
 } from 'lucide-react';
 
 const navigation = [
   { name: 'Dashboard', href: '/dispatch', icon: LayoutDashboard },
   { name: 'Deliveries', href: '/dispatch/deliveries', icon: Package },
   { name: 'Drivers', href: '/dispatch/drivers', icon: Users },
+  { name: 'Requests', href: '/dispatch/requests', icon: Inbox },
   { name: 'Applications', href: '/dispatch/applications', icon: ClipboardList },
   { name: 'Live Map', href: '/dispatch/map', icon: Map },
   { name: 'Reports', href: '/dispatch/reports', icon: BarChart3 },

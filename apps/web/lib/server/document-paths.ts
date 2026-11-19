@@ -10,6 +10,8 @@ export const ALLOWED_DOCUMENT_PREFIXES = [
   'insurance/',
   'registration/',
   'vehicles/',
+  // Optional resume from the driver application (2026-11-18).
+  'resumes/',
   // P-366: driver-owned folder drivers/<profile_id>/...
   'drivers/',
 ] as const;

@@ -6,7 +6,8 @@ import Image from 'next/image';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { Mail, Lock, User, Phone, ArrowRight, Loader2, Car, CheckCircle, Camera, CreditCard, Upload, X } from 'lucide-react';
-import { uploadDriverDocument, isImageFile } from '@/lib/upload-client';
+import { uploadDriverDocument, isImageFile, isPdfFile } from '@/lib/upload-client';
+import { VAN_ACCESS, EXPERIENCE, AVAILABILITY } from '@/lib/public-requests';
 
 function RegisterForm() {
   const router = useRouter();
@@ -18,6 +19,8 @@ function RegisterForm() {
   const profilePhotoRef = useRef<HTMLInputElement>(null);
   const licenseFrontRef = useRef<HTMLInputElement>(null);
   const licenseBackRef = useRef<HTMLInputElement>(null);
+  const resumeRef = useRef<HTMLInputElement>(null);
+  const [resume, setResume] = useState<File | null>(null);
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -25,6 +28,9 @@ function RegisterForm() {
     phone: '',
     password: '',
     confirm_password: '',
+    van_access: '',
+    years_experience: '',
+    availability: '',
   });
 
   const [profilePhoto, setProfilePhoto] = useState<File | null>(null);
@@ -34,7 +40,7 @@ function RegisterForm() {
   const [licenseBack, setLicenseBack] = useState<File | null>(null);
   const [licenseBackPreview, setLicenseBackPreview] = useState<string | null>(null);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setFormData((prev) => ({
       ...prev,
       [e.target.name]: e.target.value,
@@ -115,6 +121,12 @@ function RegisterForm() {
     // application (2 CCR 11016(c)(2); TRIBUNAL P-367 R1): it is optional here,
     // and the ID badge photo is collected after approval. No software ever
     // compares it to the license or any other photo.
+    if (!formData.van_access || !formData.years_experience || !formData.availability) {
+      setError('Please answer the three questions about your van, experience, and availability');
+      setLoading(false);
+      return;
+    }
+
     if (!licenseFront) {
       setError("Driver's license front photo is required");
       setLoading(false);
@@ -143,6 +155,17 @@ function RegisterForm() {
       setUploadProgress("Uploading driver's license (back)...");
       const licenseBackUrl = await uploadFile(supabase, licenseBack, 'license-back');
 
+      // Resume is optional. A failed resume upload must not lose the application.
+      let resumePath: string | null = null;
+      if (resume) {
+        setUploadProgress('Uploading resume...');
+        try {
+          resumePath = (await uploadDriverDocument(resume, 'resumes', { allowPdf: true })).path;
+        } catch (resumeErr) {
+          console.error('Resume upload failed:', resumeErr);
+        }
+      }
+
       setUploadProgress('Creating your account...');
 
       const { error: authError } = await supabase.auth.signUp({
@@ -160,6 +183,10 @@ function RegisterForm() {
             drivers_license_front_url: licenseFrontUrl,
             drivers_license_back_url: licenseBackUrl,
             onboarding_status: 'documents_submitted',
+            van_access: formData.van_access,
+            years_experience: formData.years_experience,
+            availability: formData.availability,
+            ...(resumePath ? { resume_path: resumePath } : {}),
           },
         },
       });
@@ -180,6 +207,10 @@ function RegisterForm() {
             full_name: formData.full_name,
             email: formData.email,
             phone: formData.phone,
+            van_access: formData.van_access,
+            years_experience: formData.years_experience,
+            availability: formData.availability,
+            has_resume: !!resumePath,
           }),
         });
       } catch (notifyErr) {
@@ -429,6 +460,94 @@ function RegisterForm() {
               />
             </div>
           </div>
+        </div>
+
+        <hr className="my-2" />
+
+        <p className="text-sm font-semibold text-gray-900">About your driving</p>
+        <div>
+          <label htmlFor="van_access" className="block text-sm font-medium text-gray-700">
+            Do you have a cargo van?
+          </label>
+          <select id="van_access" name="van_access" required value={formData.van_access} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
+            <option value="">Choose one</option>
+            {VAN_ACCESS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="years_experience" className="block text-sm font-medium text-gray-700">
+            Courier or delivery experience
+          </label>
+          <select id="years_experience" name="years_experience" required value={formData.years_experience} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
+            <option value="">Choose one</option>
+            {EXPERIENCE.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="availability" className="block text-sm font-medium text-gray-700">
+            Availability
+          </label>
+          <select id="availability" name="availability" required value={formData.availability} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
+            <option value="">Choose one</option>
+            {AVAILABILITY.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div>
+          <span className="block text-sm font-medium text-gray-700">Resume (optional)</span>
+          <p className="text-xs text-gray-500 mb-2">PDF or a photo, up to 4 MB.</p>
+          {resume ? (
+            <div className="flex items-center justify-between border border-gray-300 rounded-lg px-3 py-2 text-sm">
+              <span className="truncate mr-2">{resume.name}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setResume(null);
+                  if (resumeRef.current) resumeRef.current.value = '';
+                }}
+                className="text-gray-500 hover:text-red-600"
+                aria-label="Remove resume"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => resumeRef.current?.click()}
+              className="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 text-sm text-gray-600 hover:border-epyc-primary flex items-center justify-center"
+            >
+              <Upload className="h-4 w-4 mr-2" />
+              Add resume
+            </button>
+          )}
+          <input
+            ref={resumeRef}
+            type="file"
+            accept="application/pdf,image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0] || null;
+              if (f && !isPdfFile(f) && !isImageFile(f)) {
+                setError('Resume must be a PDF or a photo.');
+                return;
+              }
+              setResume(f);
+              setError(null);
+            }}
+          />
         </div>
 
         <hr className="my-2" />

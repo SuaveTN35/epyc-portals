@@ -119,8 +119,8 @@ export function Header() {
                 <Phone className="h-5 w-5 mr-2" />
                 (818) 217-0070
               </a>
-              <Link href="/#quote" className="btn btn-primary">
-                Get Quote
+              <Link href="/request-delivery" className="btn btn-primary">
+                Request Delivery
               </Link>
             </div>
 
@@ -178,8 +178,8 @@ export function Header() {
                 </Link>
               </div>
               <hr className="my-4" />
-              <Link href="/#quote" className="btn btn-primary w-full" onClick={() => setMobileMenuOpen(false)}>
-                Get Quote
+              <Link href="/request-delivery" className="btn btn-primary w-full" onClick={() => setMobileMenuOpen(false)}>
+                Request Delivery
               </Link>
             </div>
           </div>

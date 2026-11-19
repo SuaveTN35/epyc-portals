@@ -7,6 +7,7 @@ import {
   OPS_INBOX,
 } from '@/lib/email';
 import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { VAN_ACCESS, EXPERIENCE, AVAILABILITY, labelFor } from '@/lib/public-requests';
 
 /**
  * Fired right after a driver application is submitted.
@@ -22,6 +23,10 @@ const schema = z.object({
   full_name: z.string().trim().max(200).nullable().optional(),
   email: z.string().trim().email().max(320),
   phone: z.string().trim().max(40).nullable().optional(),
+  van_access: z.string().max(40).nullable().optional(),
+  years_experience: z.string().max(40).nullable().optional(),
+  availability: z.string().max(40).nullable().optional(),
+  has_resume: z.boolean().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -44,7 +49,20 @@ export async function POST(request: NextRequest) {
   const phone = payload.phone?.trim() || null;
 
   const ack = applicantAcknowledgement(fullName);
-  const alert = opsNewApplicationAlert({ fullName, email: payload.email, phone });
+  // Only known answers become labels; anything else is dropped.
+  const known = (list: readonly { value: string; label: string }[], v?: string | null) =>
+    list.some((o) => o.value === v) ? labelFor(list, v) : '';
+  const alert = opsNewApplicationAlert({
+    fullName,
+    email: payload.email,
+    phone,
+    answers: [
+      ['Cargo van', known(VAN_ACCESS, payload.van_access)],
+      ['Experience', known(EXPERIENCE, payload.years_experience)],
+      ['Availability', known(AVAILABILITY, payload.availability)],
+    ],
+    hasResume: payload.has_resume === true,
+  });
 
   const [applicantResult, opsResult] = await Promise.all([
     sendEmail({
