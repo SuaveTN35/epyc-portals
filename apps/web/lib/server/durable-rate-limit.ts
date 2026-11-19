@@ -24,11 +24,14 @@ export async function checkDurableRateLimit(
     const admin = createAdminClient();
     if (!admin) return local;
     const key = createHash('sha256').update(identifier).digest('hex');
-    const { data, error } = await admin.rpc('rate_limit_hit', {
-      p_key: key,
-      p_limit: config.limit,
-      p_window_seconds: config.windowSeconds,
-    });
+    // Fail open fast: a slow database must not hang the form.
+    const { data, error } = await admin
+      .rpc('rate_limit_hit', {
+        p_key: key,
+        p_limit: config.limit,
+        p_window_seconds: config.windowSeconds,
+      })
+      .abortSignal(AbortSignal.timeout(1500));
     const row = Array.isArray(data) ? data[0] : null;
     if (error || !row) {
       console.error('[durable-rate-limit] falling back to in-memory:', error?.message ?? 'no row');

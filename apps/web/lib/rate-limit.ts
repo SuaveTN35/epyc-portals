@@ -75,14 +75,7 @@ export function checkRateLimit(
  * Get client identifier from request
  */
 export function getClientIdentifier(request: Request): string {
-  // On Vercel, x-vercel-forwarded-for is set by the platform and cannot be
-  // supplied by the client, so prefer it. Vercel also overwrites
-  // x-forwarded-for, which stays the fallback (and what tests use).
-  const vercel = request.headers.get('x-vercel-forwarded-for');
-  if (vercel) {
-    return vercel.split(',')[0].trim();
-  }
-
+  // Try to get real IP from common proxy headers
   const forwarded = request.headers.get('x-forwarded-for');
   const realIp = request.headers.get('x-real-ip');
 
