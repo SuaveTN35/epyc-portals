@@ -6,7 +6,8 @@ import {
   opsNewApplicationAlert,
   OPS_INBOX,
 } from '@/lib/email';
-import { checkRateLimit, getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { getClientIdentifier, RATE_LIMITS } from '@/lib/rate-limit';
+import { checkDurableRateLimit } from '@/lib/server/durable-rate-limit';
 import { VAN_ACCESS, EXPERIENCE, AVAILABILITY, labelFor } from '@/lib/public-requests';
 
 /**
@@ -30,7 +31,7 @@ const schema = z.object({
 });
 
 export async function POST(request: NextRequest) {
-  const rate = checkRateLimit(
+  const rate = await checkDurableRateLimit(
     `notify-driver:${getClientIdentifier(request)}`,
     RATE_LIMITS.auth
   );

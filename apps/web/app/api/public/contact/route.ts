@@ -8,7 +8,8 @@ import {
   contactAcknowledgement,
   type ContactEmailData,
 } from '@/lib/email';
-import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
+import { getClientIdentifier } from '@/lib/rate-limit';
+import { checkDurableRateLimit } from '@/lib/server/durable-rate-limit';
 
 /**
  * "Send us a message" on /contact. Replaces the old mailto: form, which only
@@ -21,7 +22,7 @@ import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
 const LIMIT = { limit: 5, windowSeconds: 600 };
 
 export async function POST(request: NextRequest) {
-  const rate = checkRateLimit(`contact:${getClientIdentifier(request)}`, LIMIT);
+  const rate = await checkDurableRateLimit(`contact:${getClientIdentifier(request)}`, LIMIT);
   if (!rate.success) {
     return NextResponse.json(
       { ok: false, error: 'Too many messages. Please wait a few minutes or call (818) 217-0070.' },

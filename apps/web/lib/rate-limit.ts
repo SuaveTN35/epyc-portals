@@ -1,6 +1,7 @@
 /**
  * Simple in-memory rate limiter for API routes
- * For production at scale, replace with Redis-based solution (Upstash, etc.)
+ * Per-instance only. Public form routes use lib/server/durable-rate-limit.ts,
+ * which shares one count across instances via Postgres.
  */
 
 interface RateLimitEntry {
@@ -74,7 +75,14 @@ export function checkRateLimit(
  * Get client identifier from request
  */
 export function getClientIdentifier(request: Request): string {
-  // Try to get real IP from common proxy headers
+  // On Vercel, x-vercel-forwarded-for is set by the platform and cannot be
+  // supplied by the client, so prefer it. Vercel also overwrites
+  // x-forwarded-for, which stays the fallback (and what tests use).
+  const vercel = request.headers.get('x-vercel-forwarded-for');
+  if (vercel) {
+    return vercel.split(',')[0].trim();
+  }
+
   const forwarded = request.headers.get('x-forwarded-for');
   const realIp = request.headers.get('x-real-ip');
 
