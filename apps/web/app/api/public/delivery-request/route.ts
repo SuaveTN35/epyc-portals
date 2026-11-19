@@ -15,7 +15,8 @@ import {
   customerRequestAcknowledgement,
   type DeliveryRequestEmailData,
 } from '@/lib/email';
-import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
+import { getClientIdentifier } from '@/lib/rate-limit';
+import { checkDurableRateLimit } from '@/lib/server/durable-rate-limit';
 
 /**
  * "Request a delivery" from the public site, no account needed.
@@ -30,7 +31,7 @@ import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
 const LIMIT = { limit: 5, windowSeconds: 600 };
 
 export async function POST(request: NextRequest) {
-  const rate = checkRateLimit(`delivery-request:${getClientIdentifier(request)}`, LIMIT);
+  const rate = await checkDurableRateLimit(`delivery-request:${getClientIdentifier(request)}`, LIMIT);
   if (!rate.success) {
     return NextResponse.json(
       { ok: false, error: 'Too many requests. Please wait a few minutes or call (818) 217-0070.' },
