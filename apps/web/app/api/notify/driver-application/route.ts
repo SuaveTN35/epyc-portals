@@ -48,7 +48,7 @@ export async function POST(request: NextRequest) {
   const fullName = payload.full_name?.trim() || null;
   const phone = payload.phone?.trim() || null;
 
-  const ack = applicantAcknowledgement(fullName);
+  const ack = applicantAcknowledgement();
   // Only known answers become labels; anything else is dropped.
   const known = (list: readonly { value: string; label: string }[], v?: string | null) =>
     list.some((o) => o.value === v) ? labelFor(list, v) : '';
