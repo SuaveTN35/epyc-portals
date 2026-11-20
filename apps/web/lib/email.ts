@@ -98,12 +98,15 @@ function shell(bodyHtml: string): string {
 </body></html>`;
 }
 
-/** Acknowledgement sent to the applicant the moment they submit. */
-export function applicantAcknowledgement(fullName: string | null) {
-  const name = (fullName || '').trim().split(' ')[0] || 'there';
-
+/**
+ * Acknowledgement sent to the applicant the moment they submit.
+ * The route is public and this goes to the address the visitor typed, so it
+ * carries fixed text only, no visitor input (same rule as the request and
+ * contact acknowledgements).
+ */
+export function applicantAcknowledgement() {
   const html = shell(`
-    <p style="margin:0 0 14px;">Hi ${escapeHtml(name)},</p>
+    <p style="margin:0 0 14px;">Hello,</p>
     <p style="margin:0 0 14px;">We received your driver application and your documents came through. Thank you for applying to drive with Epyc.</p>
     <p style="margin:0 0 8px;font-weight:600;">What happens next</p>
     <ol style="margin:0 0 16px;padding-left:20px;">
@@ -117,7 +120,7 @@ export function applicantAcknowledgement(fullName: string | null) {
     <p style="margin:0;">Thanks for your interest,<br><strong>Epyc Courier Service</strong></p>
   `);
 
-  const text = `Hi ${name},
+  const text = `Hello,
 
 We received your driver application and your documents came through. Thank you for applying to drive with Epyc.
 
@@ -180,7 +183,7 @@ Review the application in the dispatch queue.
 
 Applicants who wait more than two days usually take other work. Call early.`;
 
-  return { subject: `New driver application: ${name}`, html, text };
+  return { subject: `New driver application: ${oneLine(name)}`, html, text };
 }
 
 function detailTable(rows: Array<[string, string | null | undefined]>): string {
@@ -251,30 +254,32 @@ export function opsNewDeliveryRequest(d: DeliveryRequestEmailData) {
 ${detailText(deliveryRows(d))}
 
 Call the customer to confirm the price and book it. ${savedNote}`;
-  return { subject: `Delivery request ${d.reference}: ${d.contactName}`, html, text };
+  return { subject: `Delivery request ${d.reference}: ${oneLine(d.contactName)}`, html, text };
 }
 
-/** Acknowledgement to the person who asked for a delivery. */
+/**
+ * Acknowledgement to the person who asked for a delivery.
+ *
+ * Goes to whatever address the visitor typed, so it carries NO visitor free
+ * text (name, addresses, notes, time window). Otherwise anyone could make
+ * epyccs.com mail a stranger with words they chose. Only the server-made
+ * reference and labels from fixed lists appear here.
+ */
 export function customerRequestAcknowledgement(d: DeliveryRequestEmailData) {
-  const first = d.contactName.trim().split(' ')[0] || 'there';
   const rows: Array<[string, string | null]> = [
     ['Reference', d.reference],
-    ['Pickup', d.pickupAddress],
-    ['Drop-off', d.dropoffAddress],
     ['Item', d.itemType],
     ['When', d.serviceLevel],
-    ['Date', d.pickupDate],
-    ['Time window', d.timeWindow],
   ];
   const html = shell(`
-    <p style="margin:0 0 14px;">Hi ${escapeHtml(first)},</p>
+    <p style="margin:0 0 14px;">Hello,</p>
     <p style="margin:0 0 14px;">Thanks for your delivery request. A dispatcher will call you shortly to confirm the price and pickup time. Nothing is booked or charged until you confirm.</p>
     ${detailTable(rows)}
     <p style="margin:18px 0 14px;">If it is urgent, call us at
       <a href="tel:8182170070" style="color:${BRAND_GREEN};font-weight:600;text-decoration:none;">(818) 217-0070</a> and give your reference.</p>
     <p style="margin:0;">Thank you,<br><strong>Epyc Courier Service</strong></p>
   `);
-  const text = `Hi ${first},
+  const text = `Hello,
 
 Thanks for your delivery request. A dispatcher will call you shortly to confirm the price and pickup time. Nothing is booked or charged until you confirm.
 
@@ -321,20 +326,23 @@ export function opsNewContactMessage(m: ContactEmailData) {
 ${detailText(rows)}
 
 Reply to this email to answer them directly. ${savedNote}`;
-  return { subject: `Website message (${m.subject}): ${m.fullName}`, html, text };
+  return { subject: `Website message (${oneLine(m.subject)}): ${oneLine(m.fullName)}`, html, text };
 }
 
-/** Acknowledgement to the person who used the /contact form. */
-export function contactAcknowledgement(m: ContactEmailData) {
-  const first = m.fullName.trim().split(' ')[0] || 'there';
+/**
+ * Acknowledgement to the person who used the /contact form.
+ * Fixed text only, no visitor input (see customerRequestAcknowledgement).
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function contactAcknowledgement(_m: ContactEmailData) {
   const html = shell(`
-    <p style="margin:0 0 14px;">Hi ${escapeHtml(first)},</p>
+    <p style="margin:0 0 14px;">Hello,</p>
     <p style="margin:0 0 14px;">Thanks for reaching out to Epyc Courier Service. We received your message and will get back to you soon.</p>
     <p style="margin:0 0 14px;">If you need a delivery right away, call us at
       <a href="tel:8182170070" style="color:${BRAND_GREEN};font-weight:600;text-decoration:none;">(818) 217-0070</a>.</p>
     <p style="margin:0;">Thank you,<br><strong>Epyc Courier Service</strong></p>
   `);
-  const text = `Hi ${first},
+  const text = `Hello,
 
 Thanks for reaching out to Epyc Courier Service. We received your message and will get back to you soon.
 
@@ -378,6 +386,11 @@ Los Angeles, CA | (818) 217-0070 | epyccs.com
 
 You get these emails because delivery updates are on in your Epyc account settings.`;
   return { subject, html, text };
+}
+
+/** Collapse line breaks so visitor text can never split an email subject. */
+function oneLine(s: string): string {
+  return s.replace(/[\r\n]+/g, ' ').trim();
 }
 
 function escapeHtml(s: string): string {

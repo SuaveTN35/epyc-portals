@@ -1,6 +1,7 @@
 /**
  * Simple in-memory rate limiter for API routes
- * For production at scale, replace with Redis-based solution (Upstash, etc.)
+ * Per-instance only. Public form routes use lib/server/durable-rate-limit.ts,
+ * which shares one count across instances via Postgres.
  */
 
 interface RateLimitEntry {

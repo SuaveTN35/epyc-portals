@@ -15,7 +15,9 @@ import {
   customerRequestAcknowledgement,
   type DeliveryRequestEmailData,
 } from '@/lib/email';
-import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
+import { getClientIdentifier } from '@/lib/rate-limit';
+import { checkDurableRateLimit } from '@/lib/server/durable-rate-limit';
+import { verifyTurnstile, tokenFrom } from '@/lib/server/turnstile';
 
 /**
  * "Request a delivery" from the public site, no account needed.
@@ -30,7 +32,7 @@ import { checkRateLimit, getClientIdentifier } from '@/lib/rate-limit';
 const LIMIT = { limit: 5, windowSeconds: 600 };
 
 export async function POST(request: NextRequest) {
-  const rate = checkRateLimit(`delivery-request:${getClientIdentifier(request)}`, LIMIT);
+  const rate = await checkDurableRateLimit(`delivery-request:${getClientIdentifier(request)}`, LIMIT);
   if (!rate.success) {
     return NextResponse.json(
       { ok: false, error: 'Too many requests. Please wait a few minutes or call (818) 217-0070.' },
@@ -43,6 +45,14 @@ export async function POST(request: NextRequest) {
     body = await request.json();
   } catch {
     return NextResponse.json({ ok: false, error: 'Invalid request' }, { status: 400 });
+  }
+
+  const human = await verifyTurnstile(tokenFrom(body), getClientIdentifier(request));
+  if (!human.ok) {
+    return NextResponse.json(
+      { ok: false, error: 'Please complete the security check and try again, or call (818) 217-0070.', captcha: true },
+      { status: 403 }
+    );
   }
 
   const parsed = deliveryRequestSchema.safeParse(body);
