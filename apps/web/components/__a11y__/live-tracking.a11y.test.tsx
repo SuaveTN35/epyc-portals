@@ -94,6 +94,53 @@ describe('Driver location notice', () => {
   });
 });
 
+describe('Driver location in the phone app', () => {
+  it('explains first, then shares through the native watcher with the phone locked', async () => {
+    let nativeCb: ((loc?: Record<string, number | null>, err?: { code?: string }) => void) | null = null;
+    const addWatcher = vi.fn(async (_o: unknown, fn: typeof nativeCb) => {
+      nativeCb = fn;
+      return 'w1';
+    });
+    (window as unknown as { Capacitor?: unknown }).Capacitor = {
+      isNativePlatform: () => true,
+      isPluginAvailable: () => true,
+      Plugins: {
+        BackgroundGeolocation: { addWatcher, removeWatcher: vi.fn(async () => undefined), openSettings: vi.fn(async () => undefined) },
+        Haptics: { notification: vi.fn(async () => undefined), vibrate: vi.fn() },
+      },
+    };
+    window.localStorage.clear();
+    global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })) as typeof fetch;
+    const watch = vi.spyOn(navigator.geolocation, 'watchPosition');
+    try {
+      const { container } = render(<LocationSharing deliveryId={JOB} active />);
+      const region = await screen.findByRole('region', { name: 'Share your location for this job' });
+      expect(region.textContent).toMatch(/while your phone is locked/);
+      expect(await axeViolations(container)).toEqual([]);
+      await act(async () => {
+        screen.getByRole('button', { name: 'Turn on location' }).click();
+      });
+      await waitFor(() => expect(nativeCb).not.toBeNull());
+      expect(watch).not.toHaveBeenCalled();
+      await act(async () => {
+        nativeCb?.({ latitude: 34.05, longitude: -118.24, accuracy: 10, speed: null, bearing: null });
+      });
+      await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/You can lock your phone/));
+      expect(window.localStorage.getItem('epyc-location-explainer-accepted')).toBe('yes');
+
+      await act(async () => {
+        nativeCb?.(undefined, { code: 'NOT_AUTHORIZED' });
+      });
+      const alert = await screen.findByRole('alert');
+      expect(alert.textContent).toMatch(/Epyc Driver app/);
+      expect(screen.getByRole('button', { name: 'Open settings' })).toBeTruthy();
+      expect(await axeViolations(container)).toEqual([]);
+    } finally {
+      delete (window as unknown as { Capacitor?: unknown }).Capacitor;
+    }
+  });
+});
+
 describe('Customer live tracking card', () => {
   it('labels the card, the map and the link, with no axe violations', async () => {
     global.fetch = vi.fn(

@@ -2,13 +2,25 @@
 
 // Shares the driver's GPS position while a job is active, so dispatch's live
 // map and the customer's delivery page can follow the job. Runs only while
-// this screen is open: phone browsers pause GPS for pages in the background,
-// which is why the screen is kept awake while sharing. Background tracking
-// needs the native driver app (next phase).
+// the job screen is open in a phone browser (browsers pause GPS for pages in
+// the background, which is why the screen is kept awake). In the EPYC Driver
+// phone app the native plugin keeps sharing with the screen locked, until the
+// job is done.
 
 import { useEffect, useRef, useState } from 'react';
 import { MapPin } from 'lucide-react';
 import { locationAgeLabel, shouldSendLocation, type LatLng } from '@/lib/live-location';
+import {
+  hapticAlert,
+  hasBackgroundLocation,
+  openNativeSettings,
+  watchNativeLocation,
+  type NativeFix,
+} from '@/lib/native-app';
+
+// In the phone app the driver's yes to the explainer is remembered on the
+// phone, since the browser permission check is not available there.
+const NATIVE_CONSENT_KEY = 'epyc-location-explainer-accepted';
 
 type SharingState = 'starting' | 'on' | 'denied' | 'unavailable' | 'error' | 'stopped';
 
@@ -27,10 +39,22 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
   // disclosure", App Store 5.1.1): null while checking, false until the driver
   // taps Turn on location, true once allowed or already granted.
   const [consented, setConsented] = useState<boolean | null>(null);
+  const [native, setNative] = useState(false);
 
   useEffect(() => {
     if (!active || consented !== null) return;
     let cancelled = false;
+    if (hasBackgroundLocation()) {
+      setNative(true);
+      let accepted = false;
+      try {
+        accepted = window.localStorage.getItem(NATIVE_CONSENT_KEY) === 'yes';
+      } catch {
+        // Storage blocked: show the explainer again.
+      }
+      setConsented(accepted);
+      return;
+    }
     const perms = typeof navigator !== 'undefined' ? navigator.permissions : undefined;
     if (!perms?.query) {
       setConsented(false);
@@ -57,16 +81,17 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
 
   useEffect(() => {
     if (!active || consented !== true) return;
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+    const useNative = native && hasBackgroundLocation();
+    if (!useNative && (typeof navigator === 'undefined' || !navigator.geolocation)) {
       setState('unavailable');
       return;
     }
     stopped.current = false;
     setState('starting');
 
-    const send = async (pos: GeolocationPosition) => {
+    const send = async (fix: NativeFix) => {
       if (stopped.current || sending.current) return;
-      const next = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      const next = { lat: fix.lat, lng: fix.lng };
       const now = Date.now();
       if (!shouldSendLocation(lastSent.current, next, now)) return;
       sending.current = true;
@@ -79,9 +104,9 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
             deliveryId,
             lat: next.lat,
             lng: next.lng,
-            accuracy: pos.coords.accuracy,
-            speed: pos.coords.speed,
-            heading: pos.coords.heading,
+            accuracy: fix.accuracy,
+            speed: fix.speed,
+            heading: fix.heading,
           }),
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; stop?: boolean };
@@ -105,8 +130,36 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
       }
     };
 
+    if (useNative) {
+      // Phone app: the native watcher keeps running with the screen locked.
+      let stopNative: (() => void) | null = null;
+      let ended = false;
+      watchNativeLocation(
+        (fix) => void send(fix),
+        (err) => setState(err)
+      )
+        .then((stop) => {
+          if (ended) stop?.();
+          else stopNative = stop;
+          if (!stop) setState('unavailable');
+        })
+        .catch(() => setState('error'));
+      return () => {
+        ended = true;
+        stopped.current = true;
+        stopNative?.();
+      };
+    }
+
     const watchId = navigator.geolocation.watchPosition(
-      (pos) => void send(pos),
+      (pos) =>
+        void send({
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude,
+          accuracy: pos.coords.accuracy,
+          speed: pos.coords.speed,
+          heading: pos.coords.heading,
+        }),
       (err) => setState(err.code === err.PERMISSION_DENIED ? 'denied' : 'error'),
       { enableHighAccuracy: true, maximumAge: 10_000, timeout: 30_000 }
     );
@@ -133,18 +186,14 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
       document.removeEventListener('visibilitychange', onVisible);
       void wakeLock?.release().catch(() => undefined);
     };
-  }, [active, deliveryId, consented]);
+  }, [active, deliveryId, consented, native]);
 
   // A problem is shown on screen and, where the phone allows, felt as a
   // vibration, so it never depends on sound or on sight alone.
   const problem = state === 'denied' || state === 'unavailable' || state === 'error';
   useEffect(() => {
     if (!active || !problem) return;
-    try {
-      navigator.vibrate?.([200, 100, 200]);
-    } catch {
-      // Not supported (iPhone Safari): the on-screen notice still shows.
-    }
+    hapticAlert([200, 100, 200], 'problem');
   }, [active, problem]);
 
   if (!active || state === 'stopped' || consented === null) return null;
@@ -162,11 +211,21 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
         <p className="mt-2">
           Epyc uses your phone&apos;s location while you have a job in progress, from accepting it until delivery, so
           the customer and dispatch can see where the delivery is. It is not collected when you have no job.
+          {native ? ' It keeps sharing while your phone is locked, until the delivery is done.' : ''}
         </p>
         <div className="mt-3 flex flex-wrap items-center gap-4">
           <button
             type="button"
-            onClick={() => setConsented(true)}
+            onClick={() => {
+              if (native) {
+                try {
+                  window.localStorage.setItem(NATIVE_CONSENT_KEY, 'yes');
+                } catch {
+                  // Storage blocked: the explainer shows again next job.
+                }
+              }
+              setConsented(true);
+            }}
             className="min-h-[44px] rounded-lg bg-epyc-primary px-4 py-2 font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-epyc-primary focus-visible:ring-offset-2"
           >
             Turn on location
@@ -187,11 +246,15 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
         : 'bg-amber-50 border-amber-200 text-amber-900';
   const message =
     state === 'on'
-      ? `Sharing your location with dispatch and the customer. Last sent ${locationAgeLabel(lastSentIso, nowMs)}. Keep this screen open.`
+      ? `Sharing your location with dispatch and the customer. Last sent ${locationAgeLabel(lastSentIso, nowMs)}. ${
+          native ? 'You can lock your phone; sharing stops when the delivery is done.' : 'Keep this screen open.'
+        }`
       : state === 'starting'
         ? 'Turning on location sharing...'
         : state === 'denied'
-          ? 'Location is off for this site. Turn on location for Epyc in your phone settings so the customer can follow the delivery.'
+          ? native
+            ? 'Location is off for the Epyc Driver app. Turn it on in your phone settings so the customer can follow the delivery.'
+            : 'Location is off for this site. Turn on location for Epyc in your phone settings so the customer can follow the delivery.'
           : state === 'unavailable'
             ? 'This phone cannot share location from the browser.'
             : 'Location could not be sent. It will keep trying.';
@@ -203,7 +266,21 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
       aria-live={problem ? 'assertive' : 'polite'}
     >
       <MapPin className="mt-0.5 h-5 w-5 flex-none" aria-hidden="true" />
-      <span>{message}</span>
+      <span>
+        {message}
+        {native && state === 'denied' ? (
+          <>
+            {' '}
+            <button
+              type="button"
+              onClick={() => openNativeSettings()}
+              className="min-h-[44px] font-semibold underline focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-700"
+            >
+              Open settings
+            </button>
+          </>
+        ) : null}
+      </span>
     </div>
   );
 }

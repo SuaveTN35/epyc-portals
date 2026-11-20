@@ -18,6 +18,7 @@ import { VEHICLE_CONFIG, formatCurrency, formatDistance, formatDuration } from '
 import type { VehicleType } from '@epyc/shared';
 import { formatWindow, type DriverOfferPayload } from '@/lib/job-offers';
 import { InstallAppCard } from '@/components/driver/InstallAppCard';
+import { hapticAlert } from '@/lib/native-app';
 
 export default function JobsPage() {
   const [isOnline, setIsOnline] = useState(false);
@@ -63,11 +64,8 @@ export default function JobsPage() {
           const fresh = ids.filter((id) => id && !seenOfferIds.current!.has(id)).length;
           if (fresh > 0) {
             setNewOfferNotice(fresh === 1 ? 'New job offer below.' : `${fresh} new job offers below.`);
-            try {
-              navigator.vibrate?.([300, 150, 300]);
-            } catch {
-              // Not supported (iPhone Safari): the on-screen notice still shows.
-            }
+            // Felt as well as seen: phone haptics in the app, vibration in browsers that allow it.
+            hapticAlert([300, 150, 300]);
           }
         }
         seenOfferIds.current = new Set(ids);

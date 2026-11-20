@@ -1,19 +1,24 @@
 # Driver app: App Store and Google Play readiness
 
-## Recommended packaging: Capacitor around the driver portal
+## Packaging: Capacitor around the driver portal (built)
+Rico said yes on Nov 20, 2026. The shell is in apps/driver-app (see its
+README for Mac build steps).
+
 Wrap the existing Next.js driver portal (/driver) in a Capacitor shell for iOS
 and Android, and add native plugins where the web cannot do the job.
 
 - Reuses every driver screen already built and tested; one codebase for web
   and both stores.
 - Native background location while a job is in progress:
-  - Android: a foreground service with a persistent "Sharing location for
-    your delivery" notification. Play counts that as foreground location, so
-    no background-location review is needed.
-  - iOS: "When In Use" permission with background updates on during a job
-    (the blue location indicator shows). No "Always" permission.
-- Native camera for pickup and delivery photos, push notifications for new
-  offers, haptics (iPhone browsers cannot vibrate).
+  - Android: a foreground service with a persistent "Epyc delivery in
+    progress" notification. No ACCESS_BACKGROUND_LOCATION; Play asks for a
+    foreground service (location) declaration with a short video instead.
+  - iOS: asks "While Using", then "Always" so sharing continues with the
+    screen locked (the blue location indicator shows). Review notes must say
+    location is used only while a delivery is in progress.
+- Camera for pickup and delivery photos and haptics (iPhone browsers cannot
+  vibrate) are in. Push notifications for new offers in the app come later
+  (Firebase and APNs).
 - Apple guideline 4.2 (minimum functionality) is the main risk for wrapped
   web apps; the native location, camera, push and haptics features answer it.
 
@@ -31,7 +36,8 @@ versions drift apart. Not recommended now.
 | Location history retention | 90 days in the policy; daily purge at /api/cron/purge-locations (vercel.json). Needs CRON_SECRET set in Vercel. |
 | Reviewer test logins with demo jobs | Script ready: apps/web/scripts/seed-reviewer-demo.mjs (dry run by default; not run) |
 | App icon 1024 (no alpha) and splash 2732 | Done: apps/web/store-assets/ (regenerate with scripts/generate-driver-icons.mjs) |
-| Permission strings | To add in the native shell: iOS NSLocationWhenInUseUsageDescription, NSCameraUsageDescription, NSPhotoLibraryUsageDescription; Android ACCESS_FINE_LOCATION, FOREGROUND_SERVICE_LOCATION, CAMERA, POST_NOTIFICATIONS |
+| Permission strings | Done in apps/driver-app: iOS location (While Using and Always), camera, photo library, background mode location; Android fine and coarse location, foreground service location, notifications, camera |
+| Native shell, icons, splash | Done: apps/driver-app (Capacitor 8, app id com.epyccs.driver) |
 | Data safety form (Play) and privacy labels (Apple) | To fill in at submission: precise location, name, email, phone, photos; linked to the user; not sold; not used for ads |
 
 ## What Rico does (not Claude)
