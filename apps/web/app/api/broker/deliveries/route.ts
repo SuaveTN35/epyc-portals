@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
         ) * 1.3; // Approximate driving distance
       }
 
-      const quote = calculateQuote(quoteRequest, distance);
+      const quote = calculateQuote(quoteRequest, distance, { pickupAt: new Date() });
       totalPrice = quote.total_price;
       driverPayout = quote.driver_payout;
       distanceMiles = quote.distance_miles;

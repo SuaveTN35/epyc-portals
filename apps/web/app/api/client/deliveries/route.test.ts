@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 import { calculateQuote } from '@epyc/shared';
 import { haversineDrivingMiles } from '@/lib/server/distance';
@@ -163,6 +163,16 @@ const fetchMock = vi.fn(async (input: string | URL) => {
     return json({ status: 'REQUEST_DENIED', error_message: 'denied' });
   }
   throw new Error(`unexpected fetch ${url.hostname}`);
+});
+
+// Prices now depend on pickup time (after hours, weekends). Pin the clock to
+// a weekday at noon Pacific so the expected quote has no time charges.
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date('2026-11-18T20:00:00Z'));
+});
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 beforeEach(() => {

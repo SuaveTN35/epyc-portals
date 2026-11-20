@@ -245,7 +245,11 @@ export type ServerQuote = ReturnType<typeof calculateQuote>;
 /** What the customer sees: the server quote without the driver payout. */
 export type CustomerQuote = Omit<ServerQuote, 'driver_payout'>;
 
-export function quoteForBooking(body: CustomerBookingRequest, distanceMiles: number): ServerQuote {
+export function quoteForBooking(
+  body: CustomerBookingRequest,
+  distanceMiles: number,
+  pickupAt?: Date
+): ServerQuote {
   const request: QuoteRequest = {
     pickup_address: body.pickup_address,
     pickup_city: body.pickup_city,
@@ -267,7 +271,9 @@ export function quoteForBooking(body: CustomerBookingRequest, distanceMiles: num
     temperature_min: body.temperature_min,
     temperature_max: body.temperature_max,
   };
-  return calculateQuote(request, distanceMiles);
+  // Pickup is now (no scheduled time on the form yet): after-hours and
+  // weekend charges go by the booking time, Pacific.
+  return calculateQuote(request, distanceMiles, pickupAt ? { pickupAt } : {});
 }
 
 export function toCustomerQuote(quote: ServerQuote): CustomerQuote {
