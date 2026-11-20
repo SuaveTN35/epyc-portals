@@ -3,62 +3,51 @@
 One file per repo. Overwrite it at the end of every work session (Claude Duet or
 Claude Code on the Mac). Do not append or keep old copies.
 
-Last updated: 2026-11-18, Claude Duet
-Branches open:
-- claude/public-requests-and-driver-apply (PR #1, open, not merged)
-- claude/client-pickup-delivery-alerts (draft PR, stacked on PR #1, not merged)
+Last updated: 2026-11-20, Claude Duet
 
-## Done: PR #1 (public requests and driver apply)
-- Public "Request a Delivery" form, working contact form, driver screening
-  questions and resume upload, dispatch Requests inbox.
-- Migration: packages/supabase/migrations/20261118000000_public_requests.sql
-- Vercel preview builds. Until SUPABASE_SERVICE_ROLE_KEY and RESEND_API_KEY are
-  set for Preview, the preview forms cannot save or email.
+## Where things stand
+- main: PR #1 (public requests, driver apply) is merged and live. PRs #5 and #6
+  (Turnstile on public forms) are merged. Another Duet thread owns the live
+  site's Turnstile and redeploy; do not touch production env vars or deploys.
+- PR #2 (draft) claude/client-pickup-delivery-alerts -> main. Client email/text
+  alerts at assigned, picked up, delivered, plus the signed /track/<id>/<sig>
+  page. main merged in on Nov 20 (email.ts kept both functions). Its migration
+  packages/supabase/migrations/20261118000100_client_alerts.sql is NOT applied,
+  so alerts return not_ready and send nothing.
+- PR #7 (draft) claude/driver-app-test-run -> claude/client-pickup-delivery-alerts.
+  Driver GPS while on a job and live customer tracking. Vercel preview built.
 
-## Done: client alerts branch (step 1 of the driver app plan)
-- Client gets an email, and a text if they turned texts on, when a driver is
-  assigned, when the package is picked up and when it is delivered.
-- Each alert links to a signed public tracking page, /track/<id>/<sig>, with the
-  status steps, pickup item photos, drop-off photo and signature. Medical and
-  HIPAA jobs show no photos. No addresses or names on the page or in texts.
-- Alerts go only to real client accounts on Epyc's own jobs (source direct or
-  dispatch_app). Staff, drivers and partner jobs (curri, walmart_spark, broker,
-  other) get nothing. Dispatch-made jobs use the dispatcher as customer, so
-  they send nothing until a real client is set on the job.
-- Each alert goes out once per job and channel (client_alerts table, unique index).
-- Client Settings: the text switch now saves profiles.sms_opt_in with consent
-  wording. The email and marketing switches saved columns that did not exist;
-  the migration adds them.
-- Migration (not run): packages/supabase/migrations/20261118000100_client_alerts.sql
-- Checks: 387 vitest tests pass, tsc clean, next build passes with placeholder
-  public Supabase env (the PR #1 page /dispatch/requests needs it to prerender).
+## Done in PR #7
+- POST /api/driver/location: signed-in driver only, rate limited, checks the job
+  is theirs and live, writes driver_locations and drivers.current_lat/lng.
+  Uses the existing driver_locations table and RLS; no migration.
+- components/driver/LocationSharing.tsx on the driver job screen: watches GPS
+  while the job is live, sends a fix at most every 10 s (25 m move) or 60 s,
+  keeps the screen awake, shows a visual notice and vibrates on problems.
+- GET /api/client/deliveries/[id]/live: the job's owner only; driver position
+  only while live and under 15 minutes old.
+- components/delivery/LiveDeliveryTracker.tsx on the client job page: polls every
+  15 s while visible, map with driver dot, refreshes the page on status change.
+- /track page refreshes every 30 s until finished. Dispatch Live Map shows the
+  latest fix per driver instead of every fix.
+- Accessibility: axe-core (dev dependency) tests in
+  components/__a11y__/live-tracking.a11y.test.tsx, WCAG 2.0-2.2 A/AA tags,
+  0 violations, plus contrast checks for the colors used.
+- Test script for Rico: docs/driver-app-test-script.md.
 
 ## Open
-- Nothing sent, no provider account made, no migration run, nothing deployed.
-- packages/supabase/tests/public_requests.pglite.mjs is written but not run.
-- No text opt-in on the booking form yet; clients turn texts on in Settings.
-- The person receiving the package gets no texts yet (only the client who booked).
-- GPS tracking needs the Expo driver app (step 2 of the plan). driver_locations
-  is still never written, so the dispatch map stays empty.
-
-## Before merging (Rico)
-PR #1 first:
-1. Supabase: check the live handle_new_user() still matches the phase0 version,
-   then apply 20261118000000_public_requests.sql.
-2. Vercel: set SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY (and EPYC_OPS_EMAIL,
-   EPYC_MAIL_FROM if not default) for Production and Preview; confirm epyccs.com
-   is verified in Resend.
-3. Preview smoke test: one delivery request and one contact message.
-Then the alerts PR:
-4. Apply 20261118000100_client_alerts.sql (after PR #1's migration).
-5. Vercel: set CLIENT_TRACKING_SECRET (openssl rand -base64 32). Without it,
-   alerts link to the client portal instead of the tracking page.
-6. For texts: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER or
-   TWILIO_MESSAGING_SERVICE_SID, and make sure the A2P 10DLC campaign covers
-   client delivery updates.
-7. Preview test with a test client account and a test driver: assign, pick up,
-   deliver, and check the emails, texts and tracking page.
+- Preview needs SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  for the map) set for Preview in Vercel before the test works end to end.
+- Web location only works while the driver's job screen is open.
+- App store work not started in code. Recommended route: Capacitor wrapping the
+  driver portal (native background location with a visible notification,
+  camera, push, haptics). Waiting on Rico's yes before adding the app shell.
+- Store items still to build: privacy policy section on location and account
+  deletion, in-app account deletion, location explanation screen, reviewer demo
+  accounts seed script (do not run live), icons and splash.
+- Rest of the website still needs a WCAG 2.2 AA audit.
+- Nothing merged, deployed, migrated or sent. No provider, Apple or Google
+  accounts made. Rico registers store accounts himself, ideally under Epyc.
 
 ## Next step
-Rico reviews PR #1 and merges it, then reviews the alerts draft PR. After that:
-step 2 of the plan, the Expo driver app with background GPS.
+Rico runs the test script on the PR #7 preview. Then the store items above.
