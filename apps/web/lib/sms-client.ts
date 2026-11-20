@@ -25,3 +25,8 @@ export function requestAssignedText(deliveryId: string) {
 export function requestProblemAlert(deliveryId: string, reason: string) {
   post(`/api/driver/deliveries/${encodeURIComponent(deliveryId)}/problem-alert`, { reason });
 }
+
+/** Ask the server to text and email the client for the job's current status. */
+export function requestClientAlert(deliveryId: string) {
+  post(`/api/deliveries/${encodeURIComponent(deliveryId)}/client-alert`, {});
+}

@@ -6,7 +6,14 @@ export const SMS_SITE_URL = 'https://www.epyccs.com';
 export const SMS_OPT_OUT_FOOTER = 'Reply STOP to opt out.';
 export const SMS_CONSENT_TEXT = 'Text me job offers and updates. Msg and data rates may apply. Reply STOP to opt out.';
 
-export type SmsKind = 'job_offer' | 'job_assigned' | 'problem_ops';
+export type SmsKind =
+  | 'job_offer'
+  | 'job_assigned'
+  | 'problem_ops'
+  // Client delivery alerts (lib/client-alerts.ts, migration 20261118000100).
+  | 'client_assigned'
+  | 'client_picked_up'
+  | 'client_delivered';
 
 /**
  * Normalize a phone number to E.164. Ten digits are treated as US (+1).

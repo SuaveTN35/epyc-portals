@@ -7,6 +7,12 @@
  * application submission.
  */
 
+import {
+  clientAlertParagraphs,
+  clientAlertSubject,
+  type ClientAlertEmailInput,
+} from '@/lib/client-alerts';
+
 const RESEND_ENDPOINT = 'https://api.resend.com/emails';
 
 /** Where internal notifications land. */
@@ -347,6 +353,39 @@ Epyc Courier Service
 UDIG Solutions Inc. dba Epyc Courier Service
 Los Angeles, CA | (818) 217-0070 | epyccs.com`;
   return { subject: 'We received your message', html, text };
+}
+
+/** Delivery status email to the client who booked the job (assigned, picked up, delivered). */
+export function clientDeliveryAlertEmail(input: ClientAlertEmailInput) {
+  const first = (input.firstName || '').trim().split(' ')[0] || 'there';
+  const subject = clientAlertSubject(input.event, input.job);
+  const paragraphs = clientAlertParagraphs(input);
+  const html = shell(`
+    <p style="margin:0 0 14px;">Hi ${escapeHtml(first)},</p>
+    ${paragraphs.map((p) => `<p style="margin:0 0 14px;">${escapeHtml(p)}</p>`).join('\n    ')}
+    <p style="margin:18px 0 18px;">
+      <a href="${escapeHtml(input.link)}" style="display:inline-block;background:${BRAND_GREEN};color:#ffffff;font-weight:600;text-decoration:none;padding:11px 20px;border-radius:6px;">Track this delivery</a>
+    </p>
+    <p style="margin:0 0 14px;">Questions? Call or text us at
+      <a href="tel:8182170070" style="color:${BRAND_GREEN};font-weight:600;text-decoration:none;">(818) 217-0070</a>.</p>
+    <p style="margin:0;">Thank you,<br><strong>Epyc Courier Service</strong></p>
+    <p style="margin:18px 0 0;color:#78838f;font-size:12px;">You get these emails because delivery updates are on in your Epyc account settings.</p>
+  `);
+  const text = `Hi ${first},
+
+${paragraphs.join('\n\n')}
+
+Track this delivery: ${input.link}
+
+Questions? Call or text us at (818) 217-0070.
+
+Thank you,
+Epyc Courier Service
+UDIG Solutions Inc. dba Epyc Courier Service
+Los Angeles, CA | (818) 217-0070 | epyccs.com
+
+You get these emails because delivery updates are on in your Epyc account settings.`;
+  return { subject, html, text };
 }
 
 /** Collapse line breaks so visitor text can never split an email subject. */

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2, Check } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { CLIENT_SMS_CONSENT_TEXT } from '@/lib/client-alerts';
 
 interface NotificationPreferencesProps {
   initialPreferences: {
@@ -19,6 +20,7 @@ export function NotificationPreferences({
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [preferences, setPreferences] = useState(initialPreferences);
 
   const handleToggle = async (key: keyof typeof preferences) => {
@@ -32,6 +34,7 @@ export function NotificationPreferences({
   const handleSave = async () => {
     setLoading(true);
     setSuccess(false);
+    setError(null);
 
     const supabase = createClient();
     const {
@@ -43,15 +46,21 @@ export function NotificationPreferences({
       return;
     }
 
-    await supabase.from('profiles').update({
+    // sms_opt_in is the same consent flag driver texts use: the database
+    // stamps sms_opt_in_at, and a STOP reply turns it off.
+    const { error: saveError } = await supabase.from('profiles').update({
       email_notifications: preferences.email_delivery_updates,
-      sms_notifications: preferences.sms_delivery_updates,
+      sms_opt_in: preferences.sms_delivery_updates,
       marketing_emails: preferences.email_marketing,
       updated_at: new Date().toISOString(),
     }).eq('id', user.id);
 
-    setSuccess(true);
     setLoading(false);
+    if (saveError) {
+      setError('Could not save your notification settings. Try again or call (818) 217-0070.');
+      return;
+    }
+    setSuccess(true);
     router.refresh();
   };
 
@@ -90,9 +99,9 @@ export function NotificationPreferences({
 
           <label className="flex items-center justify-between">
             <div>
-              <p className="text-gray-900">SMS notifications</p>
+              <p className="text-gray-900">Text message updates</p>
               <p className="text-sm text-gray-500">
-                Receive text messages for real-time delivery updates
+                {CLIENT_SMS_CONSENT_TEXT} Texts go to the phone number in your profile.
               </p>
             </div>
             <button
@@ -146,6 +155,7 @@ export function NotificationPreferences({
       </div>
 
       <div className="flex items-center justify-end gap-4 pt-4">
+        {error && <span className="text-sm text-red-600">{error}</span>}
         {success && (
           <span className="flex items-center text-sm text-green-600">
             <Check className="h-4 w-4 mr-1" />
