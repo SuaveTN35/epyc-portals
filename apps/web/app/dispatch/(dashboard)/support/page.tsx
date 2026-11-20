@@ -251,8 +251,10 @@ export default function SupportPage() {
           <div className="flex items-center justify-between mb-4">
             <h1 className="text-xl font-bold text-gray-900">Support Tickets</h1>
             <button
+              type="button"
               onClick={fetchTickets}
               className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
+              aria-label="Refresh tickets"
             >
               <RefreshCw className="h-4 w-4" />
             </button>

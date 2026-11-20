@@ -282,6 +282,7 @@ export default function DriverDetailPage() {
           <Link
             href="/dispatch/drivers"
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Back to drivers"
           >
             <ArrowLeft className="h-5 w-5 text-gray-600" />
           </Link>

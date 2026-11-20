@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   Package,
@@ -27,6 +27,10 @@ export default function JobsPage() {
   const [respondingTo, setRespondingTo] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [blockedReason, setBlockedReason] = useState<string | null>(null);
+  // New offers are shown, announced to screen readers and felt as a
+  // vibration, so a driver never has to hear them (WCAG 1.3.3, 4.1.3).
+  const [newOfferNotice, setNewOfferNotice] = useState<string | null>(null);
+  const seenOfferIds = useRef<Set<string> | null>(null);
 
   const supabase = createClient();
 
@@ -53,7 +57,21 @@ export default function JobsPage() {
       if (!res.ok) {
         setError(body.error || 'Could not load job offers.');
       } else {
-        setJobOffers(body.offers || []);
+        const offers: DriverOfferPayload[] = body.offers || [];
+        const ids = offers.map((o) => o.id);
+        if (seenOfferIds.current) {
+          const fresh = ids.filter((id) => id && !seenOfferIds.current!.has(id)).length;
+          if (fresh > 0) {
+            setNewOfferNotice(fresh === 1 ? 'New job offer below.' : `${fresh} new job offers below.`);
+            try {
+              navigator.vibrate?.([300, 150, 300]);
+            } catch {
+              // Not supported (iPhone Safari): the on-screen notice still shows.
+            }
+          }
+        }
+        seenOfferIds.current = new Set(ids);
+        setJobOffers(offers);
         setBlockedReason(typeof body.blocked_reason === 'string' ? body.blocked_reason : null);
       }
     } catch {
@@ -156,12 +174,14 @@ export default function JobsPage() {
             </p>
           </div>
           <button
+            type="button"
             onClick={toggleOnlineStatus}
-            className={`relative flex items-center px-4 py-2 rounded-full font-medium transition-colors ${
+            aria-pressed={isOnline}
+            className={`relative flex min-h-[44px] items-center px-4 py-2 rounded-full font-medium transition-colors ${
               isOnline ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-600'
             }`}
           >
-            <Power className="h-5 w-5 mr-2" />
+            <Power className="h-5 w-5 mr-2" aria-hidden="true" />
             {isOnline ? 'Online' : 'Offline'}
           </button>
         </div>
@@ -178,9 +198,24 @@ export default function JobsPage() {
           disabled={refreshing}
           className="flex items-center text-epyc-primary"
         >
-          <RefreshCw className={`h-5 w-5 mr-1 ${refreshing ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`h-5 w-5 mr-1 ${refreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
           Refresh
         </button>
+      </div>
+
+      <div role="status" aria-live="polite">
+        {newOfferNotice && (
+          <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-green-300 bg-green-50 p-3 text-base font-medium text-green-800">
+            <span>{newOfferNotice}</span>
+            <button
+              type="button"
+              onClick={() => setNewOfferNotice(null)}
+              className="min-h-[44px] px-3 text-green-800 underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
       </div>
 
       {blockedReason && (

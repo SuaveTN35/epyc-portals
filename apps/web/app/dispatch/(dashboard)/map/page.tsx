@@ -516,8 +516,10 @@ export default function LiveMapPage() {
 
         {/* Refresh button */}
         <button
+          type="button"
           onClick={fetchMapData}
           className="absolute top-4 right-4 z-10 p-2 bg-white rounded-lg shadow-md hover:bg-gray-50"
+          aria-label="Refresh map"
         >
           <RefreshCw className="h-5 w-5 text-gray-600" />
         </button>

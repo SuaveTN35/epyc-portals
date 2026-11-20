@@ -116,3 +116,10 @@ describe('mapsLink', () => {
     expect(mapsLink(LA)).toBe('https://www.google.com/maps/search/?api=1&query=34.052200,-118.243700');
   });
 });
+
+describe('retentionCutoff', () => {
+  it('is 90 days before now', async () => {
+    const { retentionCutoff } = await import('./live-location');
+    expect(retentionCutoff(Date.UTC(2026, 10, 20))).toBe('2026-08-22T00:00:00.000Z');
+  });
+});

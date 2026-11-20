@@ -13,6 +13,7 @@ vi.mock('@/lib/hooks/useGoogleMaps', () => ({
 
 import { LocationSharing } from '@/components/driver/LocationSharing';
 import { LiveDeliveryTracker } from '@/components/delivery/LiveDeliveryTracker';
+import { DeleteAccount } from '@/components/settings/DeleteAccount';
 
 const JOB = '3f2b6c1e-8a4d-4f2a-9b7c-1d2e3f4a5b6c';
 
@@ -43,12 +44,21 @@ beforeEach(() => {
     },
   });
   Object.defineProperty(navigator, 'vibrate', { configurable: true, value: vi.fn(() => true) });
+  setPermission('granted');
 });
+
+function setPermission(state: PermissionState) {
+  Object.defineProperty(navigator, 'permissions', {
+    configurable: true,
+    value: { query: vi.fn(async () => ({ state })) },
+  });
+}
 
 describe('Driver location notice', () => {
   it('announces sharing politely and has no axe violations', async () => {
     global.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 })) as typeof fetch;
     const { container } = render(<LocationSharing deliveryId={JOB} active />);
+    await waitFor(() => expect(onPosition).not.toBeNull());
     await act(async () => {
       onPosition?.({ coords: { latitude: 34.05, longitude: -118.24, accuracy: 10, speed: null, heading: null } } as GeolocationPosition);
     });
@@ -57,8 +67,23 @@ describe('Driver location notice', () => {
     expect(await axeViolations(container)).toEqual([]);
   });
 
+  it('explains location use before the phone asks, with no axe violations', async () => {
+    setPermission('prompt');
+    const watch = vi.spyOn(navigator.geolocation, 'watchPosition');
+    const { container } = render(<LocationSharing deliveryId={JOB} active />);
+    const region = await screen.findByRole('region', { name: 'Share your location for this job' });
+    expect(region.textContent).toMatch(/not collected when you have no job/);
+    expect(watch).not.toHaveBeenCalled();
+    expect(await axeViolations(container)).toEqual([]);
+    await act(async () => {
+      screen.getByRole('button', { name: 'Turn on location' }).click();
+    });
+    expect(watch).toHaveBeenCalled();
+  });
+
   it('shows a denied location as an alert and vibrates, never sound alone', async () => {
     const { container } = render(<LocationSharing deliveryId={JOB} active />);
+    await waitFor(() => expect(onError).not.toBeNull());
     await act(async () => {
       onError?.({ code: 1, PERMISSION_DENIED: 1 } as GeolocationPositionError);
     });
@@ -95,6 +120,21 @@ describe('Customer live tracking card', () => {
   });
 });
 
+describe('Delete account', () => {
+  it('needs DELETE typed, labels the field and has no axe violations', async () => {
+    const { container } = render(<DeleteAccount audience="driver" />);
+    expect(screen.getByRole('region', { name: 'Delete account' }).textContent).toMatch(/location history/);
+    await act(async () => {
+      screen.getByRole('button', { name: 'Delete my account' }).click();
+    });
+    const field = screen.getByLabelText('Type DELETE to confirm');
+    const submit = screen.getByRole('button', { name: 'Delete my account for good' }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    expect(document.activeElement).toBe(field);
+    expect(await axeViolations(container)).toEqual([]);
+  });
+});
+
 // WCAG 1.4.3: normal text needs 4.5:1. Pairs used by these components.
 function luminance(hex: string): number {
   const c = hex.replace('#', '').match(/../g)!.map((h) => parseInt(h, 16) / 255);
@@ -114,6 +154,10 @@ describe('color contrast (WCAG 1.4.3 AA)', () => {
     ['card text: gray-700 on white', '#374151', '#ffffff'],
     ['link: Epyc green on white', '#065F46', '#ffffff'],
     ['map notice: gray-700 on gray-50', '#374151', '#f9fafb'],
+    ['delete heading and error: red-700 on white', '#b91c1c', '#ffffff'],
+    ['delete button: white on red-700', '#ffffff', '#b91c1c'],
+    ['disabled delete button: white on gray-500', '#ffffff', '#6b7280'],
+    ['explainer button: white on Epyc green', '#ffffff', '#065F46'],
   ];
   for (const [name, fg, bg] of pairs) {
     it(`${name} is at least 4.5:1`, () => {

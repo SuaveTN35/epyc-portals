@@ -23,6 +23,31 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
   const lastSent = useRef<(LatLng & { atMs: number }) | null>(null);
   const sending = useRef(false);
   const stopped = useRef(false);
+  // Shown before the phone's own location prompt (Google Play "prominent
+  // disclosure", App Store 5.1.1): null while checking, false until the driver
+  // taps Turn on location, true once allowed or already granted.
+  const [consented, setConsented] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!active || consented !== null) return;
+    let cancelled = false;
+    const perms = typeof navigator !== 'undefined' ? navigator.permissions : undefined;
+    if (!perms?.query) {
+      setConsented(false);
+      return;
+    }
+    perms
+      .query({ name: 'geolocation' as PermissionName })
+      .then((status) => {
+        if (!cancelled) setConsented(status.state === 'granted');
+      })
+      .catch(() => {
+        if (!cancelled) setConsented(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, consented]);
 
   // Refresh the "updated X ago" label.
   useEffect(() => {
@@ -31,7 +56,7 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
   }, []);
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || consented !== true) return;
     if (typeof navigator === 'undefined' || !navigator.geolocation) {
       setState('unavailable');
       return;
@@ -108,7 +133,7 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
       document.removeEventListener('visibilitychange', onVisible);
       void wakeLock?.release().catch(() => undefined);
     };
-  }, [active, deliveryId]);
+  }, [active, deliveryId, consented]);
 
   // A problem is shown on screen and, where the phone allows, felt as a
   // vibration, so it never depends on sound or on sight alone.
@@ -122,7 +147,37 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
     }
   }, [active, problem]);
 
-  if (!active || state === 'stopped') return null;
+  if (!active || state === 'stopped' || consented === null) return null;
+
+  if (consented === false) {
+    return (
+      <section
+        aria-labelledby="location-explainer-heading"
+        className="mx-4 mt-3 rounded-lg border border-gray-300 bg-white px-4 py-3 text-base text-gray-800"
+      >
+        <h2 id="location-explainer-heading" className="flex items-center gap-2 text-lg font-semibold text-gray-900">
+          <MapPin className="h-5 w-5 flex-none" aria-hidden="true" />
+          Share your location for this job
+        </h2>
+        <p className="mt-2">
+          Epyc uses your phone&apos;s location while you have a job in progress, from accepting it until delivery, so
+          the customer and dispatch can see where the delivery is. It is not collected when you have no job.
+        </p>
+        <div className="mt-3 flex flex-wrap items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setConsented(true)}
+            className="min-h-[44px] rounded-lg bg-epyc-primary px-4 py-2 font-semibold text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-epyc-primary focus-visible:ring-offset-2"
+          >
+            Turn on location
+          </button>
+          <a href="/privacy" className="text-epyc-primary underline">
+            Privacy policy
+          </a>
+        </div>
+      </section>
+    );
+  }
 
   const tone =
     state === 'on'

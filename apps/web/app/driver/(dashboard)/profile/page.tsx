@@ -16,6 +16,7 @@ import {
 import { VEHICLE_CONFIG, LOYALTY_TIER_CONFIG } from '@epyc/shared';
 import { SmsOptInToggle } from '@/components/driver/SmsOptInToggle';
 import { DriverProfileChecklist } from '@/components/driver/DriverProfileChecklist';
+import { DeleteAccount } from '@/components/settings/DeleteAccount';
 
 export default async function ProfilePage() {
   const supabase = await createClient();
@@ -215,6 +216,10 @@ export default async function ProfilePage() {
         <MenuItem icon={Bell} label="Notifications" href="/driver/jobs" />
         <MenuItem icon={HelpCircle} label="Help & Support" href="/contact" />
         <MenuItem icon={LogOut} label="Sign Out" href="/api/auth/signout" isDestructive />
+      </div>
+
+      <div className="mt-4">
+        <DeleteAccount audience="driver" />
       </div>
     </div>
   );

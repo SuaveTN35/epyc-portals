@@ -35,19 +35,38 @@ Last updated: 2026-11-20, Claude Duet
   0 violations, plus contrast checks for the colors used.
 - Test script for Rico: docs/driver-app-test-script.md.
 
+## Done in PR #7, second commit (store and accessibility)
+- In-app account deletion: components/settings/DeleteAccount.tsx on client
+  Settings and driver Profile; POST /api/account/delete;
+  lib/server/account-deletion.ts (full delete when no history, otherwise
+  wipe personal details, remove document files and location history, ban the
+  sign-in; staff and open jobs refused). Public /delete-account and
+  /account-deleted pages.
+- Privacy policy: new section 4 Driver Location Data and section 9 Deleting
+  Your Account. Daily purge of location history older than 90 days:
+  /api/cron/purge-locations with apps/web/vercel.json (needs CRON_SECRET).
+- Location explainer on the driver job screen before the phone's prompt.
+- New job offers: on-screen notice, screen reader announcement, vibration.
+- Store icon 1024 and splash 2732 in apps/web/store-assets/.
+- Reviewer demo seed script apps/web/scripts/seed-reviewer-demo.mjs (NOT run).
+- Accessibility fixes site-wide: header menu button, footer social links,
+  driver register pickers, client phone menu (was a dead button, now works),
+  dispatch back and refresh buttons. axe on 15 public pages: 0 issues.
+- docs/accessibility-checklist.md and docs/app-store-readiness.md.
+- Checks: 455 vitest tests pass, tsc clean, next build passes.
+
 ## Open
 - Preview needs SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
   for the map) set for Preview in Vercel before the test works end to end.
 - Web location only works while the driver's job screen is open.
-- App store work not started in code. Recommended route: Capacitor wrapping the
-  driver portal (native background location with a visible notification,
-  camera, push, haptics). Waiting on Rico's yes before adding the app shell.
-- Store items still to build: privacy policy section on location and account
-  deletion, in-app account deletion, location explanation screen, reviewer demo
-  accounts seed script (do not run live), icons and splash.
-- Rest of the website still needs a WCAG 2.2 AA audit.
+- Capacitor app shell not started: waiting on Rico's yes.
+- Rico to confirm retention wording (90 days location; delivery records kept
+  as tax and legal rules require) and set CRON_SECRET in Vercel.
+- Client Settings "Change" email/password and "Enable" two-factor buttons do
+  nothing. Signed-in screens still need a real-browser axe pass with data.
 - Nothing merged, deployed, migrated or sent. No provider, Apple or Google
   accounts made. Rico registers store accounts himself, ideally under Epyc.
 
 ## Next step
-Rico runs the test script on the PR #7 preview. Then the store items above.
+Rico runs docs/driver-app-test-script.md on the PR #7 preview, and says yes or
+no to the Capacitor shell.

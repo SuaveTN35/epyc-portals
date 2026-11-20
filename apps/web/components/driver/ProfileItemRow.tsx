@@ -129,8 +129,8 @@ export function ProfileItemRow({ def, state, reason, thumbUrl, isPdf, onFile, ch
           <div className="flex flex-col items-end gap-2 flex-shrink-0">
             {thumbUrl ? (
               isPdf ? (
-                <a href={thumbUrl} target="_blank" rel="noopener noreferrer" className="w-14 h-14 rounded-lg bg-gray-100 flex items-center justify-center">
-                  <FileText className="h-6 w-6 text-gray-400" />
+                <a href={thumbUrl} target="_blank" rel="noopener noreferrer" aria-label={`Open ${def.label} (opens in a new tab)`} className="w-14 h-14 rounded-lg bg-gray-100 flex items-center justify-center">
+                  <FileText className="h-6 w-6 text-gray-400" aria-hidden="true" />
                 </a>
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element

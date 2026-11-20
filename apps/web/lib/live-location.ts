@@ -146,3 +146,11 @@ export function latestPerDriver<T extends LocationRow>(rows: T[]): T[] {
 export function mapsLink(p: LatLng): string {
   return `https://www.google.com/maps/search/?api=1&query=${p.lat.toFixed(6)},${p.lng.toFixed(6)}`;
 }
+
+/** Days of driver location history kept (the privacy policy promises 90). */
+export const LOCATION_RETENTION_DAYS = 90;
+
+/** ISO time before which location rows are deleted by the daily purge. */
+export function retentionCutoff(nowMs: number, days = LOCATION_RETENTION_DAYS): string {
+  return new Date(nowMs - days * 24 * 60 * 60 * 1000).toISOString();
+}
