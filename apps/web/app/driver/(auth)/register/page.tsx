@@ -265,7 +265,7 @@ function RegisterForm() {
     <div className="bg-white py-8 px-6 shadow-xl rounded-xl">
       <form className="space-y-5" onSubmit={handleSubmit}>
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
             {error}
           </div>
         )}
@@ -282,10 +282,11 @@ function RegisterForm() {
               id="full_name"
               name="full_name"
               type="text"
+              autoComplete="name"
               required
               value={formData.full_name}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="John Doe"
             />
           </div>
@@ -307,7 +308,7 @@ function RegisterForm() {
               required
               value={formData.email}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="driver@example.com"
             />
           </div>
@@ -325,10 +326,11 @@ function RegisterForm() {
               id="phone"
               name="phone"
               type="tel"
+              autoComplete="tel"
               required
               value={formData.phone}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="(555) 123-4567"
             />
           </div>
@@ -351,6 +353,7 @@ function RegisterForm() {
                 />
                 <button
                   type="button"
+                  aria-label="Remove photo"
                   onClick={() => removeFile(setProfilePhoto, setProfilePhotoPreview, profilePhotoRef)}
                   className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
                 >
@@ -361,7 +364,7 @@ function RegisterForm() {
               <button
                 type="button"
                 onClick={() => profilePhotoRef.current?.click()}
-                className="flex flex-col items-center justify-center w-28 h-28 border-2 border-dashed border-gray-300 rounded-full hover:border-epyc-primary hover:bg-epyc-light transition-colors"
+                className="flex flex-col items-center justify-center w-28 h-28 border-2 border-dashed border-gray-500 rounded-full hover:border-epyc-primary hover:bg-epyc-light transition-colors"
               >
                 <Camera className="h-8 w-8 text-gray-400" />
                 <span className="text-xs text-gray-500 mt-1">Add Photo</span>
@@ -372,6 +375,8 @@ function RegisterForm() {
               type="file"
               accept="image/*"
               className="hidden"
+              tabIndex={-1}
+              aria-hidden="true"
               onChange={(e) => handleFileChange(e, setProfilePhoto, setProfilePhotoPreview)}
             />
             <p className="text-xs text-gray-500 mt-2">
@@ -384,7 +389,7 @@ function RegisterForm() {
         {/* Driver's License Upload */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">
-            Driver&apos;s License <span className="text-red-500">*</span>
+            Driver&apos;s License <span className="text-red-600">*</span>
           </label>
           <p className="text-xs text-gray-500 mb-3">Upload clear photos of both sides of your valid driver&apos;s license.</p>
 
@@ -403,7 +408,8 @@ function RegisterForm() {
                   />
                   <button
                     type="button"
-                    onClick={() => removeFile(setLicenseFront, setLicenseFrontPreview, licenseFrontRef)}
+                    aria-label="Remove license front photo"
+                  onClick={() => removeFile(setLicenseFront, setLicenseFrontPreview, licenseFrontRef)}
                     className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
                   >
                     <X className="h-3 w-3" />
@@ -413,7 +419,7 @@ function RegisterForm() {
                 <button
                   type="button"
                   onClick={() => licenseFrontRef.current?.click()}
-                  className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg hover:border-epyc-primary hover:bg-epyc-light transition-colors"
+                  className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-500 rounded-lg hover:border-epyc-primary hover:bg-epyc-light transition-colors"
                 >
                   <CreditCard className="h-6 w-6 text-gray-400" />
                   <span className="text-xs text-gray-500 mt-1">Front</span>
@@ -424,6 +430,8 @@ function RegisterForm() {
                 type="file"
                 accept="image/*"
                 className="hidden"
+                tabIndex={-1}
+                aria-hidden="true"
                 onChange={(e) => handleFileChange(e, setLicenseFront, setLicenseFrontPreview)}
               />
             </div>
@@ -442,7 +450,8 @@ function RegisterForm() {
                   />
                   <button
                     type="button"
-                    onClick={() => removeFile(setLicenseBack, setLicenseBackPreview, licenseBackRef)}
+                    aria-label="Remove license back photo"
+                  onClick={() => removeFile(setLicenseBack, setLicenseBackPreview, licenseBackRef)}
                     className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
                   >
                     <X className="h-3 w-3" />
@@ -452,7 +461,7 @@ function RegisterForm() {
                 <button
                   type="button"
                   onClick={() => licenseBackRef.current?.click()}
-                  className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-300 rounded-lg hover:border-epyc-primary hover:bg-epyc-light transition-colors"
+                  className="flex flex-col items-center justify-center w-full h-24 border-2 border-dashed border-gray-500 rounded-lg hover:border-epyc-primary hover:bg-epyc-light transition-colors"
                 >
                   <CreditCard className="h-6 w-6 text-gray-400" />
                   <span className="text-xs text-gray-500 mt-1">Back</span>
@@ -463,6 +472,8 @@ function RegisterForm() {
                 type="file"
                 accept="image/*"
                 className="hidden"
+                tabIndex={-1}
+                aria-hidden="true"
                 onChange={(e) => handleFileChange(e, setLicenseBack, setLicenseBackPreview)}
               />
             </div>
@@ -476,7 +487,7 @@ function RegisterForm() {
           <label htmlFor="van_access" className="block text-sm font-medium text-gray-700">
             Do you have a cargo van?
           </label>
-          <select id="van_access" name="van_access" required value={formData.van_access} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
+          <select id="van_access" name="van_access" required value={formData.van_access} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
             <option value="">Choose one</option>
             {VAN_ACCESS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -489,7 +500,7 @@ function RegisterForm() {
           <label htmlFor="years_experience" className="block text-sm font-medium text-gray-700">
             Courier or delivery experience
           </label>
-          <select id="years_experience" name="years_experience" required value={formData.years_experience} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
+          <select id="years_experience" name="years_experience" required value={formData.years_experience} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
             <option value="">Choose one</option>
             {EXPERIENCE.map((o) => (
               <option key={o.value} value={o.value}>
@@ -502,7 +513,7 @@ function RegisterForm() {
           <label htmlFor="availability" className="block text-sm font-medium text-gray-700">
             Availability
           </label>
-          <select id="availability" name="availability" required value={formData.availability} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
+          <select id="availability" name="availability" required value={formData.availability} onChange={handleChange} className="mt-1 block w-full px-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base bg-white">
             <option value="">Choose one</option>
             {AVAILABILITY.map((o) => (
               <option key={o.value} value={o.value}>
@@ -516,7 +527,7 @@ function RegisterForm() {
           <span className="block text-sm font-medium text-gray-700">Resume (optional)</span>
           <p className="text-xs text-gray-500 mb-2">PDF or a photo, up to 4 MB.</p>
           {resume ? (
-            <div className="flex items-center justify-between border border-gray-300 rounded-lg px-3 py-2 text-sm">
+            <div className="flex items-center justify-between border border-gray-500 rounded-lg px-3 py-2 text-sm">
               <span className="truncate mr-2">{resume.name}</span>
               <button
                 type="button"
@@ -534,7 +545,7 @@ function RegisterForm() {
             <button
               type="button"
               onClick={() => resumeRef.current?.click()}
-              className="w-full border-2 border-dashed border-gray-300 rounded-lg py-3 text-sm text-gray-600 hover:border-epyc-primary flex items-center justify-center"
+              className="w-full border-2 border-dashed border-gray-500 rounded-lg py-3 text-sm text-gray-600 hover:border-epyc-primary flex items-center justify-center"
             >
               <Upload className="h-4 w-4 mr-2" />
               Add resume
@@ -545,6 +556,8 @@ function RegisterForm() {
             type="file"
             accept="application/pdf,image/*"
             className="hidden"
+            tabIndex={-1}
+            aria-hidden="true"
             onChange={(e) => {
               const f = e.target.files?.[0] || null;
               if (f && !isPdfFile(f) && !isImageFile(f)) {
@@ -571,10 +584,11 @@ function RegisterForm() {
               id="password"
               name="password"
               type="password"
+              autoComplete="new-password"
               required
               value={formData.password}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="At least 8 characters"
             />
           </div>
@@ -592,10 +606,11 @@ function RegisterForm() {
               id="confirm_password"
               name="confirm_password"
               type="password"
+              autoComplete="new-password"
               required
               value={formData.confirm_password}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="Confirm your password"
             />
           </div>
@@ -649,12 +664,12 @@ export default function DriverRegisterPage() {
           </div>
           <span className="text-2xl font-bold text-white drop-shadow-md">Drive with EPYC</span>
         </Link>
-        <h2 className="mt-6 text-center text-2xl font-bold text-white drop-shadow-md">
+        <h1 className="mt-6 text-center text-2xl font-bold text-white drop-shadow-md">
           Start Earning Today
-        </h2>
+        </h1>
         <p className="mt-2 text-center text-sm text-white/90">
           Already a driver?{' '}
-          <Link href="/driver/login" className="font-medium text-yellow-300 hover:text-yellow-200 underline">
+          <Link href="/driver/login" className="font-medium text-yellow-200 hover:text-yellow-100 underline">
             Sign in here
           </Link>
         </p>
@@ -667,7 +682,7 @@ export default function DriverRegisterPage() {
       </div>
 
       <div className="mt-8 text-center">
-        <Link href="/" className="text-white/80 hover:text-white text-sm">
+        <Link href="/" className="text-white/90 hover:text-white text-sm">
           ← Back to EPYC Courier
         </Link>
       </div>

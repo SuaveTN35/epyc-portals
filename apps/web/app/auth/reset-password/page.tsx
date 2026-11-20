@@ -74,7 +74,7 @@ export default function ResetPasswordPage() {
         <Link href="/" className="flex flex-col items-center justify-center">
           <Image src="/images/logo.png" alt="EPYC Courier Service" width={120} height={80} />
         </Link>
-        <h2 className="mt-6 text-center text-2xl font-bold text-gray-900">Choose a new password</h2>
+        <h1 className="mt-6 text-center text-2xl font-bold text-gray-900">Choose a new password</h1>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
@@ -99,7 +99,7 @@ export default function ResetPasswordPage() {
           ) : (
             <form className="space-y-6" onSubmit={handleSubmit}>
               {error && (
-                <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-start">
+                <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-start">
                   <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
                   {error}
                 </div>
@@ -122,7 +122,7 @@ export default function ResetPasswordPage() {
                     minLength={MIN_LENGTH}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
                     placeholder={`At least ${MIN_LENGTH} characters`}
                   />
                 </div>
@@ -145,7 +145,7 @@ export default function ResetPasswordPage() {
                     minLength={MIN_LENGTH}
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
                     placeholder="Type it again"
                   />
                 </div>

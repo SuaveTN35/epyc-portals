@@ -24,24 +24,26 @@ export function Footer() {
                 href="https://www.facebook.com/profile.php?id=61586753098066"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-400 hover:text-white transition-colors"
+                className="inline-flex p-1 -m-1 text-gray-400 hover:text-white transition-colors"
+                aria-label="EPYC Courier on Facebook (opens in a new tab)"
               >
-                <Facebook className="h-5 w-5" />
+                <Facebook className="h-5 w-5" aria-hidden="true" />
               </a>
               <a
                 href="https://www.linkedin.com/company/111494085"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-gray-400 hover:text-white transition-colors"
+                className="inline-flex p-1 -m-1 text-gray-400 hover:text-white transition-colors"
+                aria-label="EPYC Courier on LinkedIn (opens in a new tab)"
               >
-                <Linkedin className="h-5 w-5" />
+                <Linkedin className="h-5 w-5" aria-hidden="true" />
               </a>
             </div>
           </div>
 
           {/* Services */}
           <div>
-            <h3 className="text-lg font-semibold mb-4">Services</h3>
+            <h2 className="text-lg font-semibold mb-4">Services</h2>
             <ul className="space-y-2">
               <li>
                 <Link href="/services/medical" className="text-gray-400 hover:text-white transition-colors">
@@ -68,7 +70,7 @@ export function Footer() {
 
           {/* Quick Links */}
           <div>
-            <h3 className="text-lg font-semibold mb-4">Quick Links</h3>
+            <h2 className="text-lg font-semibold mb-4">Quick Links</h2>
             <ul className="space-y-2">
               <li>
                 <Link href="/about" className="text-gray-400 hover:text-white transition-colors">
@@ -95,22 +97,22 @@ export function Footer() {
 
           {/* Contact Info */}
           <div>
-            <h3 className="text-lg font-semibold mb-4">Contact Us</h3>
+            <h2 className="text-lg font-semibold mb-4">Contact Us</h2>
             <ul className="space-y-3">
               <li className="flex items-center">
-                <Phone className="h-5 w-5 mr-3 text-epyc-accent" />
+                <Phone aria-hidden="true" className="h-5 w-5 mr-3 text-epyc-accent" />
                 <a href="tel:8182170070" className="text-gray-400 hover:text-white transition-colors">
                   (818) 217-0070
                 </a>
               </li>
               <li className="flex items-center">
-                <Mail className="h-5 w-5 mr-3 text-epyc-accent" />
+                <Mail aria-hidden="true" className="h-5 w-5 mr-3 text-epyc-accent" />
                 <a href="mailto:admin@epyccs.com" className="text-gray-400 hover:text-white transition-colors">
                   admin@epyccs.com
                 </a>
               </li>
               <li className="flex items-start">
-                <MapPin className="h-5 w-5 mr-3 mt-0.5 text-epyc-accent" />
+                <MapPin aria-hidden="true" className="h-5 w-5 mr-3 mt-0.5 text-epyc-accent" />
                 <span className="text-gray-400">
                   Serving Los Angeles, Orange County, San Diego & All Southern California
                 </span>
@@ -122,15 +124,18 @@ export function Footer() {
         {/* Bottom Bar */}
         <div className="border-t border-gray-800 mt-12 pt-8">
           <div className="flex flex-col md:flex-row justify-between items-center">
-            <p className="text-gray-500 text-sm">
+            <p className="text-gray-400 text-sm">
               © {new Date().getFullYear()} EPYC Courier Service. All rights reserved.
             </p>
             <div className="flex space-x-6 mt-4 md:mt-0">
-              <Link href="/privacy" className="text-gray-500 hover:text-white text-sm transition-colors">
+              <Link href="/privacy" className="text-gray-400 hover:text-white text-sm transition-colors">
                 Privacy Policy
               </Link>
-              <Link href="/terms" className="text-gray-500 hover:text-white text-sm transition-colors">
+              <Link href="/terms" className="text-gray-400 hover:text-white text-sm transition-colors">
                 Terms of Service
+              </Link>
+              <Link href="/accessibility" className="text-gray-400 hover:text-white text-sm transition-colors">
+                Accessibility
               </Link>
             </div>
           </div>

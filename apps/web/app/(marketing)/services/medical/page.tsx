@@ -39,7 +39,7 @@ export default function MedicalServicePage() {
           <div className="max-w-3xl">
             <div className="flex items-center mb-4">
               <Stethoscope className="h-8 w-8 mr-3 text-yellow-300" />
-              <span className="text-yellow-300 font-semibold text-sm uppercase tracking-wide">
+              <span className="text-yellow-200 font-semibold text-sm uppercase tracking-wide">
                 Medical Courier
               </span>
             </div>
@@ -153,7 +153,7 @@ export default function MedicalServicePage() {
             <div className="bg-epyc-gradient rounded-2xl p-8 text-white">
               <Lock className="h-12 w-12 mb-4 text-yellow-300" />
               <h3 className="text-2xl font-bold mb-4">Your Compliance Checklist</h3>
-              <p className="text-white/80 mb-6">
+              <p className="text-white/90 mb-6">
                 Every EPYC medical delivery includes:
               </p>
               <ul className="space-y-3">

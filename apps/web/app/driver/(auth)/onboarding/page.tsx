@@ -326,7 +326,7 @@ export default function DriverOnboardingPage() {
                       className={`flex flex-col items-center p-3 border rounded-lg cursor-pointer transition-colors ${
                         formData.vehicle_type === key
                           ? 'border-epyc-primary bg-emerald-50'
-                          : 'border-gray-200 hover:border-gray-300'
+                          : 'border-gray-200 hover:border-gray-500'
                       }`}
                     >
                       <input
@@ -352,7 +352,7 @@ export default function DriverOnboardingPage() {
                     name="vehicle_make"
                     value={formData.vehicle_make}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                     placeholder="Toyota"
                   />
                 </div>
@@ -363,7 +363,7 @@ export default function DriverOnboardingPage() {
                     name="vehicle_model"
                     value={formData.vehicle_model}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                     placeholder="Camry"
                   />
                 </div>
@@ -379,7 +379,7 @@ export default function DriverOnboardingPage() {
                     onChange={handleChange}
                     min="2000"
                     max={new Date().getFullYear() + 1}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                   />
                 </div>
                 <div>
@@ -391,7 +391,7 @@ export default function DriverOnboardingPage() {
                     name="vehicle_plate"
                     value={formData.vehicle_plate}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                     placeholder="ABC1234"
                   />
                 </div>
@@ -405,7 +405,7 @@ export default function DriverOnboardingPage() {
                   value={formData.vehicle_vin}
                   onChange={handleChange}
                   maxLength={17}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg font-mono"
+                  className="w-full px-3 py-2 border border-gray-500 rounded-lg font-mono"
                   placeholder="1HGBH41JXMN109186"
                 />
                 <p className="text-xs text-gray-500 mt-1">17-character Vehicle Identification Number</p>
@@ -430,7 +430,7 @@ export default function DriverOnboardingPage() {
                         min={DIMENSION_BOUNDS[k].min}
                         max={DIMENSION_BOUNDS[k].max}
                         required
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                       />
                     </div>
                   ))}
@@ -448,7 +448,7 @@ export default function DriverOnboardingPage() {
                   min={DIMENSION_BOUNDS.cargo_capacity_lbs.min}
                   max={DIMENSION_BOUNDS.cargo_capacity_lbs.max}
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                   placeholder="1000"
                 />
                 <p className="text-xs text-gray-500 mt-1">The most weight your vehicle can safely carry, in pounds</p>
@@ -460,7 +460,7 @@ export default function DriverOnboardingPage() {
                   name="has_temperature_control"
                   checked={formData.has_temperature_control}
                   onChange={handleChange}
-                  className="h-4 w-4 text-epyc-primary focus:ring-epyc-primary border-gray-300 rounded"
+                  className="h-4 w-4 text-epyc-primary focus:ring-epyc-primary border-gray-500 rounded"
                 />
                 <span className="ml-2 text-sm text-gray-700">
                   My vehicle has temperature control (cooler/refrigeration)
@@ -492,7 +492,7 @@ export default function DriverOnboardingPage() {
                   value={formData.license_number}
                   onChange={handleChange}
                   required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                   placeholder="D1234567"
                 />
               </div>
@@ -504,7 +504,7 @@ export default function DriverOnboardingPage() {
                     name="license_state"
                     value={formData.license_state}
                     onChange={handleChange}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                   >
                     <option value="CA">California</option>
                     <option value="AZ">Arizona</option>
@@ -522,7 +522,7 @@ export default function DriverOnboardingPage() {
                     onChange={handleChange}
                     required
                     min={new Date().toISOString().split('T')[0]}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                    className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                   />
                 </div>
               </div>
@@ -530,7 +530,7 @@ export default function DriverOnboardingPage() {
               <div className="flex space-x-3">
                 <button
                   onClick={() => setStep('vehicle')}
-                  className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium flex items-center justify-center"
+                  className="flex-1 py-3 border border-gray-500 text-gray-700 rounded-lg font-medium flex items-center justify-center"
                 >
                   <ArrowLeft className="h-5 w-5 mr-2" />
                   Back
@@ -560,7 +560,7 @@ export default function DriverOnboardingPage() {
                   name="insurance_policy"
                   value={formData.insurance_policy}
                   onChange={handleChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                   placeholder="POL-123456"
                 />
               </div>
@@ -575,7 +575,7 @@ export default function DriverOnboardingPage() {
                   value={formData.insurance_expiry}
                   onChange={handleChange}
                   min={new Date().toISOString().split('T')[0]}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                 />
               </div>
 
@@ -587,7 +587,7 @@ export default function DriverOnboardingPage() {
                   value={formData.insurance_carrier}
                   onChange={handleChange}
                   maxLength={100}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                   placeholder="Company name on your card"
                 />
               </div>
@@ -609,7 +609,7 @@ export default function DriverOnboardingPage() {
                         name={k}
                         value={formData[k]}
                         onChange={handleChange}
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                        className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                       />
                     </div>
                   ))}
@@ -632,7 +632,7 @@ export default function DriverOnboardingPage() {
                       className={`flex-1 py-3 rounded-lg border text-sm font-medium ${
                         formData.insurance_business_use === o.v
                           ? 'border-epyc-primary bg-emerald-50 text-gray-900'
-                          : 'border-gray-300 text-gray-700'
+                          : 'border-gray-500 text-gray-700'
                       }`}
                     >
                       {o.t}
@@ -651,7 +651,7 @@ export default function DriverOnboardingPage() {
                   value={formData.registration_expiry}
                   onChange={handleChange}
                   min={today}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg"
+                  className="w-full px-3 py-2 border border-gray-500 rounded-lg"
                 />
               </div>
 
@@ -665,7 +665,7 @@ export default function DriverOnboardingPage() {
               <div className="flex space-x-3">
                 <button
                   onClick={() => setStep('license')}
-                  className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium flex items-center justify-center"
+                  className="flex-1 py-3 border border-gray-500 text-gray-700 rounded-lg font-medium flex items-center justify-center"
                 >
                   <ArrowLeft className="h-5 w-5 mr-2" />
                   Back
@@ -771,7 +771,7 @@ export default function DriverOnboardingPage() {
               <div className="flex space-x-3">
                 <button
                   onClick={() => setStep('documents')}
-                  className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium flex items-center justify-center"
+                  className="flex-1 py-3 border border-gray-500 text-gray-700 rounded-lg font-medium flex items-center justify-center"
                 >
                   <ArrowLeft className="h-5 w-5 mr-2" />
                   Back
@@ -848,7 +848,7 @@ export default function DriverOnboardingPage() {
                         {row.done ? (
                           <CheckCircle className="h-4 w-4 text-green-500 mr-2" />
                         ) : (
-                          <div className="h-4 w-4 border border-gray-300 rounded-full mr-2" />
+                          <div className="h-4 w-4 border border-gray-500 rounded-full mr-2" />
                         )}
                         <span className={row.done ? 'text-gray-700' : 'text-gray-400'}>
                           {row.label}
@@ -881,7 +881,7 @@ export default function DriverOnboardingPage() {
                   name="sms_opt_in"
                   checked={formData.sms_opt_in}
                   onChange={handleChange}
-                  className="mt-0.5 h-5 w-5 rounded border-gray-300 text-epyc-primary flex-shrink-0"
+                  className="mt-0.5 h-5 w-5 rounded border-gray-500 text-epyc-primary flex-shrink-0"
                 />
                 <span className="text-sm text-gray-700">{SMS_CONSENT_TEXT}</span>
               </label>
@@ -889,7 +889,7 @@ export default function DriverOnboardingPage() {
               <div className="flex space-x-3">
                 <button
                   onClick={() => setStep('photos')}
-                  className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-medium flex items-center justify-center"
+                  className="flex-1 py-3 border border-gray-500 text-gray-700 rounded-lg font-medium flex items-center justify-center"
                 >
                   <ArrowLeft className="h-5 w-5 mr-2" />
                   Back

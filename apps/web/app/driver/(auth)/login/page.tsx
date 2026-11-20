@@ -42,7 +42,7 @@ function LoginForm() {
     <div className="bg-white py-8 px-6 shadow-xl rounded-xl">
       <form className="space-y-6" onSubmit={handleSubmit}>
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
             {error}
           </div>
         )}
@@ -63,7 +63,7 @@ function LoginForm() {
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="driver@example.com"
             />
           </div>
@@ -85,7 +85,7 @@ function LoginForm() {
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="Enter your password"
             />
           </div>
@@ -97,7 +97,7 @@ function LoginForm() {
               id="remember-me"
               name="remember-me"
               type="checkbox"
-              className="h-4 w-4 text-epyc-primary focus:ring-epyc-primary border-gray-300 rounded"
+              className="h-4 w-4 text-epyc-primary focus:ring-epyc-primary border-gray-500 rounded"
             />
             <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-700">
               Keep me signed in
@@ -150,12 +150,12 @@ export default function DriverLoginPage() {
           </div>
           <span className="text-2xl font-bold text-white drop-shadow-md">Driver Portal</span>
         </Link>
-        <h2 className="mt-6 text-center text-2xl font-bold text-white drop-shadow-md">
+        <h1 className="mt-6 text-center text-2xl font-bold text-white drop-shadow-md">
           Welcome back, driver
-        </h2>
+        </h1>
         <p className="mt-2 text-center text-sm text-white/90">
           New to EPYC?{' '}
-          <Link href="/driver/register" className="font-medium text-yellow-300 hover:text-yellow-200 underline">
+          <Link href="/driver/register" className="font-medium text-yellow-200 hover:text-yellow-100 underline">
             Apply to drive
           </Link>
         </p>
@@ -168,7 +168,7 @@ export default function DriverLoginPage() {
       </div>
 
       <div className="mt-8 text-center">
-        <Link href="/" className="text-white/80 hover:text-white text-sm">
+        <Link href="/" className="text-white/90 hover:text-white text-sm">
           ← Back to EPYC Courier
         </Link>
       </div>

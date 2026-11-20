@@ -11,7 +11,9 @@ export default function MarketingLayout({
     <>
       <StructuredData />
       <Header />
-      <main>{children}</main>
+      <main id="main" tabIndex={-1} className="focus:outline-none focus:[box-shadow:none]">
+        {children}
+      </main>
       <Footer />
     </>
   );

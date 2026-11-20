@@ -63,16 +63,16 @@ export default function DispatchLoginPage() {
           />
           <span className="text-2xl font-bold text-white">Dispatch Portal</span>
         </div>
-        <h2 className="mt-6 text-center text-xl text-gray-400">
+        <h1 className="mt-6 text-center text-xl text-gray-400">
           Internal Dispatch Dashboard
-        </h2>
+        </h1>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-6 shadow-xl rounded-xl">
           <form className="space-y-6" onSubmit={handleSubmit}>
             {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-start">
+              <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-start">
                 <AlertCircle className="h-5 w-5 mr-2 flex-shrink-0" />
                 {error}
               </div>
@@ -94,7 +94,7 @@ export default function DispatchLoginPage() {
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
+                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
                   placeholder="dispatcher@epyccs.com"
                 />
               </div>
@@ -116,7 +116,7 @@ export default function DispatchLoginPage() {
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
+                  className="block w-full pl-10 pr-3 py-2.5 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
                   placeholder="Enter your password"
                 />
               </div>
@@ -148,7 +148,7 @@ export default function DispatchLoginPage() {
           </form>
         </div>
 
-        <p className="mt-6 text-center text-sm text-gray-500">
+        <p className="mt-6 text-center text-sm text-gray-400">
           Authorized personnel only. All access is logged.
         </p>
       </div>

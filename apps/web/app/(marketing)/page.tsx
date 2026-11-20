@@ -352,8 +352,8 @@ export default function HomePage() {
                 </ul>
 
                 <div className="mt-8 pt-6 border-t border-white/20">
-                  <p className="text-white/80 text-sm mb-2">Already a driver?</p>
-                  <Link href="/driver/login" className="font-semibold text-yellow-300 hover:text-yellow-200">
+                  <p className="text-white/90 text-sm mb-2">Already a driver?</p>
+                  <Link href="/driver/login" className="font-semibold text-yellow-200 hover:text-yellow-100">
                     Log in to Driver Portal →
                   </Link>
                 </div>

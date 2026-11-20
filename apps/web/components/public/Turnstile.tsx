@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 /**
  * Cloudflare Turnstile widget. Renders nothing when
@@ -52,12 +52,14 @@ export default function Turnstile({
   const ref = useRef<HTMLDivElement>(null);
   const cb = useRef(onToken);
   cb.current = onToken;
+  const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     if (!TURNSTILE_SITE_KEY || !ref.current) return;
     let id: string | null = null;
     let cancelled = false;
     cb.current(null);
+    setFailed(false);
     loadScript()
       .then(() => {
         if (cancelled || !ref.current || !window.turnstile) return;
@@ -65,10 +67,19 @@ export default function Turnstile({
           sitekey: TURNSTILE_SITE_KEY,
           callback: (t: string) => cb.current(t),
           'expired-callback': () => cb.current(null),
-          'error-callback': () => cb.current(null),
+          'error-callback': () => {
+            cb.current(null);
+            setFailed(true);
+          },
+          // Match the visitor's browser language; Cloudflare's widget is keyboard
+          // and screen reader accessible and needs no puzzle for most people.
+          language: 'auto',
         });
       })
-      .catch(() => cb.current(null));
+      .catch(() => {
+        cb.current(null);
+        setFailed(true);
+      });
     return () => {
       cancelled = true;
       if (id && window.turnstile) window.turnstile.remove(id);
@@ -76,5 +87,14 @@ export default function Turnstile({
   }, [resetKey]);
 
   if (!TURNSTILE_SITE_KEY) return null;
-  return <div ref={ref} className="flex justify-center" />;
+  return (
+    <div>
+      <div ref={ref} className="flex justify-center" />
+      {failed && (
+        <p role="alert" className="text-sm text-red-700 text-center mt-2">
+          The security check did not load. Refresh the page and try again, or call (818) 217-0070.
+        </p>
+      )}
+    </div>
+  );
 }

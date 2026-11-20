@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       <section className="bg-epyc-gradient text-white py-12 lg:py-16">
         <div className="max-w-7xl mx-auto px-4">
           <h1 className="text-3xl lg:text-4xl font-bold">Privacy Policy</h1>
-          <p className="text-white/80 mt-2">Last updated: February 2026</p>
+          <p className="text-white/90 mt-2">Last updated: February 2026</p>
         </div>
       </section>
 

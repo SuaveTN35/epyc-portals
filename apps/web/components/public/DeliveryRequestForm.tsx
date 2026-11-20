@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { CheckCircle, Loader2, Send } from 'lucide-react';
 import Turnstile, { TURNSTILE_SITE_KEY } from '@/components/public/Turnstile';
@@ -39,6 +39,22 @@ export default function DeliveryRequestForm() {
   const [captcha, setCaptcha] = useState<string | null>(null);
   const [captchaRound, setCaptchaRound] = useState(0);
   const [reference, setReference] = useState<string | null>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const alertRef = useRef<HTMLDivElement>(null);
+  const doneRef = useRef<HTMLHeadingElement>(null);
+
+  // After a failed send, move focus to the first field with a problem, or to
+  // the error message, so keyboard and screen reader users land on it.
+  useEffect(() => {
+    if (!formError) return;
+    const bad = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    (bad || alertRef.current)?.focus();
+  }, [formError, errors]);
+
+  // After a successful send, move focus to the confirmation.
+  useEffect(() => {
+    if (reference !== null) doneRef.current?.focus();
+  }, [reference]);
 
   const set = (name: Field) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setForm((f) => ({ ...f, [name]: e.target.value }));
@@ -82,8 +98,10 @@ export default function DeliveryRequestForm() {
   if (reference !== null) {
     return (
       <div className="text-center py-8" role="status">
-        <CheckCircle className="h-14 w-14 text-epyc-primary mx-auto mb-4" />
-        <h3 className="text-xl font-bold text-gray-900 mb-2">Request received</h3>
+        <CheckCircle className="h-14 w-14 text-epyc-primary mx-auto mb-4" aria-hidden="true" />
+        <h3 ref={doneRef} tabIndex={-1} className="text-xl font-bold text-gray-900 mb-2 focus:outline-none">
+          Request received
+        </h3>
         {reference && (
           <p className="text-gray-700 mb-2">
             Your reference is <strong>{reference}</strong>.
@@ -104,6 +122,8 @@ export default function DeliveryRequestForm() {
     );
   }
 
+  const waitingOnCheck = !!TURNSTILE_SITE_KEY && !captcha && !loading;
+
   const field = (name: Field) => ({
     id: `dr-${name}`,
     name,
@@ -111,13 +131,18 @@ export default function DeliveryRequestForm() {
     onChange: set(name),
     'aria-invalid': errors[name] ? true : undefined,
     'aria-describedby': errors[name] ? `dr-${name}-error` : undefined,
-    className: `${inputClass} ${errors[name] ? 'border-red-400' : 'border-gray-300'}`,
+    className: `${inputClass} ${errors[name] ? 'border-red-600' : 'border-gray-500'}`,
   });
 
   const label = (name: Field, text: string, required = false) => (
     <label htmlFor={`dr-${name}`} className="block text-sm font-medium text-gray-700 mb-1">
       {text}
-      {required && <span className="text-red-600"> *</span>}
+      {required && (
+        <span className="text-red-700" aria-hidden="true">
+          {' '}
+          *
+        </span>
+      )}
     </label>
   );
 
@@ -129,9 +154,18 @@ export default function DeliveryRequestForm() {
     ) : null;
 
   return (
-    <form onSubmit={onSubmit} className="space-y-5 text-left" noValidate>
+    <form ref={formRef} onSubmit={onSubmit} className="space-y-5 text-left" noValidate>
+      <p className="text-sm text-gray-600">
+        Fields marked <span className="text-red-700" aria-hidden="true">*</span>
+        <span className="sr-only">with an asterisk</span> are required.
+      </p>
       {formError && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm" role="alert">
+        <div
+          ref={alertRef}
+          tabIndex={-1}
+          className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm"
+          role="alert"
+        >
           {formError}
         </div>
       )}
@@ -236,10 +270,22 @@ export default function DeliveryRequestForm() {
       </div>
 
       <Turnstile onToken={setCaptcha} resetKey={captchaRound} />
-      <button type="submit" disabled={loading || (!!TURNSTILE_SITE_KEY && !captcha)} className="w-full btn btn-primary btn-lg inline-flex justify-center items-center">
-        {loading ? <Loader2 className="h-5 w-5 mr-2 animate-spin" /> : <Send className="h-5 w-5 mr-2" />}
+      <button
+        type="submit"
+        disabled={loading || waitingOnCheck}
+        aria-describedby={waitingOnCheck ? 'dr-check-hint' : undefined}
+        className="w-full btn btn-primary btn-lg inline-flex justify-center items-center disabled:opacity-60 disabled:cursor-not-allowed"
+      >
+        {loading ? (
+          <Loader2 className="h-5 w-5 mr-2 animate-spin" aria-hidden="true" />
+        ) : (
+          <Send className="h-5 w-5 mr-2" aria-hidden="true" />
+        )}
         {loading ? 'Sending...' : 'Request Delivery'}
       </button>
+      <p id="dr-check-hint" className="text-sm text-gray-600 text-center" aria-live="polite">
+        {waitingOnCheck ? 'Finish the security check above to send your request.' : ''}
+      </p>
 
       <p className="text-xs text-gray-500 text-center">
         A dispatcher calls you back with the price. Nothing is booked or charged until you confirm.

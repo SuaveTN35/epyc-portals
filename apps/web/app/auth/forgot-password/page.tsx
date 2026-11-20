@@ -48,7 +48,7 @@ export default function ForgotPasswordPage() {
         <Link href="/" className="flex flex-col items-center justify-center">
           <Image src="/images/logo.png" alt="EPYC Courier Service" width={120} height={80} />
         </Link>
-        <h2 className="mt-6 text-center text-2xl font-bold text-gray-900">Reset your password</h2>
+        <h1 className="mt-6 text-center text-2xl font-bold text-gray-900">Reset your password</h1>
         <p className="mt-2 text-center text-sm text-gray-600">
           Enter the email you sign in with and we will send you a reset link.
         </p>
@@ -85,7 +85,7 @@ export default function ForgotPasswordPage() {
                     required
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary"
                     placeholder="you@example.com"
                   />
                 </div>

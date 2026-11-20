@@ -95,7 +95,7 @@ function RegisterForm() {
     <div className="bg-white py-8 px-6 shadow-xl rounded-xl">
       <form className="space-y-5" onSubmit={handleSubmit}>
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
+          <div role="alert" className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm">
             {error}
           </div>
         )}
@@ -112,10 +112,11 @@ function RegisterForm() {
               id="full_name"
               name="full_name"
               type="text"
+              autoComplete="name"
               required
               value={formData.full_name}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="John Doe"
             />
           </div>
@@ -133,9 +134,10 @@ function RegisterForm() {
               id="company_name"
               name="company_name"
               type="text"
+              autoComplete="organization"
               value={formData.company_name}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="Acme Corp"
             />
           </div>
@@ -157,7 +159,7 @@ function RegisterForm() {
               required
               value={formData.email}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="you@company.com"
             />
           </div>
@@ -175,10 +177,11 @@ function RegisterForm() {
               id="phone"
               name="phone"
               type="tel"
+              autoComplete="tel"
               required
               value={formData.phone}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="(555) 123-4567"
             />
           </div>
@@ -196,10 +199,11 @@ function RegisterForm() {
               id="password"
               name="password"
               type="password"
+              autoComplete="new-password"
               required
               value={formData.password}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="At least 8 characters"
             />
           </div>
@@ -217,10 +221,11 @@ function RegisterForm() {
               id="confirm_password"
               name="confirm_password"
               type="password"
+              autoComplete="new-password"
               required
               value={formData.confirm_password}
               onChange={handleChange}
-              className="block w-full pl-10 pr-3 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
+              className="block w-full pl-10 pr-3 py-3 border border-gray-500 rounded-lg focus:ring-2 focus:ring-epyc-primary focus:border-epyc-primary text-base"
               placeholder="Confirm your password"
             />
           </div>
@@ -269,12 +274,12 @@ export default function ClientRegisterPage() {
           </div>
           <span className="text-2xl font-bold text-white drop-shadow-md">Client Portal</span>
         </Link>
-        <h2 className="mt-6 text-center text-2xl font-bold text-white drop-shadow-md">
+        <h1 className="mt-6 text-center text-2xl font-bold text-white drop-shadow-md">
           Create Your Account
-        </h2>
+        </h1>
         <p className="mt-2 text-center text-sm text-white/90">
           Already have an account?{' '}
-          <Link href="/client/login" className="font-medium text-yellow-300 hover:text-yellow-200 underline">
+          <Link href="/client/login" className="font-medium text-yellow-200 hover:text-yellow-100 underline">
             Sign in here
           </Link>
         </p>
@@ -287,7 +292,7 @@ export default function ClientRegisterPage() {
       </div>
 
       <div className="mt-8 text-center">
-        <Link href="/" className="text-white/80 hover:text-white text-sm">
+        <Link href="/" className="text-white/90 hover:text-white text-sm">
           ← Back to EPYC Courier
         </Link>
       </div>

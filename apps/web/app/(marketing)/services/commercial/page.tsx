@@ -39,7 +39,7 @@ export default function CommercialServicePage() {
           <div className="max-w-3xl">
             <div className="flex items-center mb-4">
               <Building2 className="h-8 w-8 mr-3 text-yellow-300" />
-              <span className="text-yellow-300 font-semibold text-sm uppercase tracking-wide">
+              <span className="text-yellow-200 font-semibold text-sm uppercase tracking-wide">
                 Commercial Delivery
               </span>
             </div>
@@ -154,7 +154,7 @@ export default function CommercialServicePage() {
             <div className="bg-epyc-gradient rounded-2xl p-8 text-white">
               <Package className="h-12 w-12 mb-4 text-yellow-300" />
               <h3 className="text-2xl font-bold mb-4">What We Can Deliver</h3>
-              <p className="text-white/80 mb-6">
+              <p className="text-white/90 mb-6">
                 Our commercial fleet handles:
               </p>
               <ul className="space-y-3">

@@ -371,7 +371,7 @@ export default function CareersPage() {
                 <Phone className="mr-2 h-5 w-5" />
                 Or Call Rico: (818) 217-0070
               </a>
-              <p className="text-white/70 text-sm text-center pt-2">
+              <p className="text-white/90 text-sm text-center pt-2">
                 Prefer email? Reach us at{' '}
                 <a href="mailto:admin@epyccs.com" className="underline">
                   admin@epyccs.com
@@ -380,7 +380,7 @@ export default function CareersPage() {
             </div>
           </div>
 
-          <p className="text-white/70 text-sm mt-8">
+          <p className="text-white/90 text-sm mt-8">
             Epyc Courier Service | UDIG Solutions Inc | Los Angeles, CA
           </p>
         </div>

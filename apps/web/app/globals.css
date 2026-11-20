@@ -16,6 +16,43 @@
 
 html {
   scroll-behavior: smooth;
+  /* Keep focused fields and anchor targets clear of the sticky header (WCAG 2.4.11). */
+  scroll-padding-top: 6rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Placeholder text readable against white (4.5:1). */
+::placeholder {
+  color: #6b7280;
+  opacity: 1;
+}
+
+/* Skip link: hidden until it gets keyboard focus. */
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -10rem;
+  z-index: 100;
+  padding: 0.75rem 1rem;
+  background: #ffffff;
+  color: #065f46;
+  font-weight: 600;
+  border-radius: 0.5rem;
+}
+.skip-link:focus {
+  top: 1rem;
 }
 
 body {
@@ -81,10 +118,12 @@ body {
   background: #94a3b8;
 }
 
-/* Focus styles */
+/* Focus styles: a green ring with a white halo, so it shows on white pages,
+   the dark footer and the green-blue gradient alike (WCAG 2.4.7, 1.4.11). */
 *:focus-visible {
-  outline: 2px solid var(--epyc-primary);
+  outline: 3px solid var(--epyc-primary);
   outline-offset: 2px;
+  box-shadow: 0 0 0 5px #ffffff;
 }
 
 /* Button base styles */

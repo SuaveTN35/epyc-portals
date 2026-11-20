@@ -51,22 +51,34 @@ export default function PublicTrackPage() {
             {/* Tracking Form */}
             <form onSubmit={handleSubmit} className="max-w-md mx-auto">
               {error && (
-                <div className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm text-left">
+                <div
+                  id="track-error"
+                  role="alert"
+                  className="mb-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm text-left"
+                >
                   {error}
                 </div>
               )}
 
+              <label htmlFor="tracking-number" className="block text-left text-sm font-medium text-white mb-2">
+                Tracking number
+              </label>
               <div className="flex gap-2">
                 <div className="relative flex-1">
                   <input
+                    id="tracking-number"
+                    name="tracking_number"
                     type="text"
+                    autoComplete="off"
+                    aria-invalid={error ? true : undefined}
+                    aria-describedby={error ? 'track-error' : undefined}
                     value={trackingNumber}
                     onChange={(e) => setTrackingNumber(e.target.value.toUpperCase())}
                     placeholder="e.g., EPYC1A2B3C4D"
                     className="w-full px-4 py-3 pr-12 border-0 rounded-lg text-gray-900 text-lg uppercase focus:ring-2 focus:ring-yellow-300"
                   />
                   <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                    <Search className="h-5 w-5 text-gray-400" />
+                    <Search className="h-5 w-5 text-gray-500" aria-hidden="true" />
                   </div>
                 </div>
                 <button
@@ -74,7 +86,14 @@ export default function PublicTrackPage() {
                   disabled={loading || !trackingNumber.trim()}
                   className="px-6 py-3 bg-yellow-400 text-gray-900 rounded-lg font-semibold hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                 >
-                  {loading ? <Loader2 className="h-5 w-5 animate-spin" /> : 'Track'}
+                  {loading ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
+                      <span className="sr-only">Searching</span>
+                    </>
+                  ) : (
+                    'Track'
+                  )}
                 </button>
               </div>
             </form>
