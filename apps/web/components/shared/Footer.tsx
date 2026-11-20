@@ -25,16 +25,18 @@ export function Footer() {
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-400 hover:text-white transition-colors"
+                aria-label="EPYC on Facebook (opens in a new tab)"
               >
-                <Facebook className="h-5 w-5" />
+                <Facebook className="h-5 w-5" aria-hidden="true" />
               </a>
               <a
                 href="https://www.linkedin.com/company/111494085"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-gray-400 hover:text-white transition-colors"
+                aria-label="EPYC on LinkedIn (opens in a new tab)"
               >
-                <Linkedin className="h-5 w-5" />
+                <Linkedin className="h-5 w-5" aria-hidden="true" />
               </a>
             </div>
           </div>

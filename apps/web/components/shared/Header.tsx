@@ -126,17 +126,21 @@ export function Header() {
 
             {/* Mobile Menu Button */}
             <button
-              className="lg:hidden p-2"
+              type="button"
+              className="lg:hidden p-2 min-h-[44px] min-w-[44px]"
               onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+              aria-expanded={mobileMenuOpen}
+              aria-controls="mobile-menu"
             >
-              {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+              {mobileMenuOpen ? <X className="h-6 w-6" aria-hidden="true" /> : <Menu className="h-6 w-6" aria-hidden="true" />}
             </button>
           </div>
         </div>
 
         {/* Mobile Menu */}
         {mobileMenuOpen && (
-          <div className="lg:hidden bg-white border-t border-gray-100">
+          <div id="mobile-menu" className="lg:hidden bg-white border-t border-gray-100">
             <div className="px-4 py-4 space-y-3">
               <Link href="/" className="block py-2 text-gray-700 font-medium" onClick={() => setMobileMenuOpen(false)}>
                 Home

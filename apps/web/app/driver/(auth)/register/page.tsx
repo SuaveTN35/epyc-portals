@@ -352,6 +352,7 @@ function RegisterForm() {
                 <button
                   type="button"
                   onClick={() => removeFile(setProfilePhoto, setProfilePhotoPreview, profilePhotoRef)}
+                  aria-label="Remove profile photo"
                   className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
                 >
                   <X className="h-4 w-4" />
@@ -370,6 +371,8 @@ function RegisterForm() {
             <input
               ref={profilePhotoRef}
               type="file"
+              aria-label="Choose profile photo"
+              tabIndex={-1}
               accept="image/*"
               className="hidden"
               onChange={(e) => handleFileChange(e, setProfilePhoto, setProfilePhotoPreview)}
@@ -404,7 +407,8 @@ function RegisterForm() {
                   <button
                     type="button"
                     onClick={() => removeFile(setLicenseFront, setLicenseFrontPreview, licenseFrontRef)}
-                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                    aria-label="Remove license front photo"
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -422,6 +426,8 @@ function RegisterForm() {
               <input
                 ref={licenseFrontRef}
                 type="file"
+                aria-label="Choose license front photo"
+                tabIndex={-1}
                 accept="image/*"
                 className="hidden"
                 onChange={(e) => handleFileChange(e, setLicenseFront, setLicenseFrontPreview)}
@@ -443,7 +449,8 @@ function RegisterForm() {
                   <button
                     type="button"
                     onClick={() => removeFile(setLicenseBack, setLicenseBackPreview, licenseBackRef)}
-                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
+                    aria-label="Remove license back photo"
+                  className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600"
                   >
                     <X className="h-3 w-3" />
                   </button>
@@ -461,6 +468,8 @@ function RegisterForm() {
               <input
                 ref={licenseBackRef}
                 type="file"
+                aria-label="Choose license back photo"
+                tabIndex={-1}
                 accept="image/*"
                 className="hidden"
                 onChange={(e) => handleFileChange(e, setLicenseBack, setLicenseBackPreview)}
@@ -543,6 +552,8 @@ function RegisterForm() {
           <input
             ref={resumeRef}
             type="file"
+            aria-label="Choose resume"
+            tabIndex={-1}
             accept="application/pdf,image/*"
             className="hidden"
             onChange={(e) => {

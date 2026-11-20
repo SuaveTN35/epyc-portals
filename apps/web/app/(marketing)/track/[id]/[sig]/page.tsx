@@ -14,6 +14,7 @@ import {
 import { cleanCity } from '@/lib/sms';
 import { isProofPathForDelivery } from '@/lib/proof-flow';
 import { isSafeSignatureData } from '@/lib/customer-delivery';
+import { AutoRefresh } from '@/components/delivery/AutoRefresh';
 
 // Signed per-job tracking page sent to clients in delivery texts and emails.
 // No sign-in: the link's signature is the key. Shows cities, never street
@@ -80,6 +81,7 @@ export default async function TrackDeliveryPage({
 
   return (
     <section className="bg-gray-50 py-12 lg:py-16">
+      {!['delivered', 'cancelled', 'failed'].includes(delivery.status) && <AutoRefresh seconds={30} />}
       <div className="max-w-2xl mx-auto px-4 space-y-6">
         <div className="bg-white rounded-xl shadow p-6">
           <div className="flex items-center gap-3 mb-2">
@@ -147,7 +149,7 @@ export default async function TrackDeliveryPage({
 
         <p className="text-sm text-gray-500 flex items-center gap-2">
           <Phone className="h-4 w-4" />
-          Questions? Call or text (818) 217-0070. Refresh this page for the latest status.
+          Questions? Call or text (818) 217-0070. This page updates on its own.
         </p>
       </div>
     </section>

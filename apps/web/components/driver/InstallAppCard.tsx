@@ -22,6 +22,7 @@ import {
   subscribeToJobAlerts,
   writeFlag,
 } from '@/lib/pwa/client';
+import { isNativeApp } from '@/lib/native-app';
 
 const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
 
@@ -38,6 +39,9 @@ export function InstallAppCard() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    // Already inside the EPYC Driver phone app: nothing to install, and web
+    // push does not run there.
+    if (isNativeApp()) return;
     const standalone = isStandalone();
     const platform = detectPlatform(navigator.userAgent, navigator.platform, navigator.maxTouchPoints);
 

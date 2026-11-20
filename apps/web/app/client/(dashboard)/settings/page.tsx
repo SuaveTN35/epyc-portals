@@ -1,7 +1,8 @@
 import { createClient } from '@/lib/supabase/server';
 import { ProfileForm } from '@/components/settings/ProfileForm';
 import { NotificationPreferences } from '@/components/settings/NotificationPreferences';
-import { User, Bell, Shield, LogOut } from 'lucide-react';
+import { User, Bell, Shield } from 'lucide-react';
+import { DeleteAccount } from '@/components/settings/DeleteAccount';
 
 async function getUserProfile() {
   const supabase = await createClient();
@@ -119,26 +120,7 @@ export default async function SettingsPage() {
           </div>
         </div>
 
-        {/* Danger Zone */}
-        <div className="bg-white rounded-lg shadow border border-red-200">
-          <div className="px-6 py-4 border-b border-red-200 flex items-center">
-            <LogOut className="h-5 w-5 text-red-500 mr-2" />
-            <h2 className="text-lg font-semibold text-red-600">Danger Zone</h2>
-          </div>
-          <div className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-gray-900">Delete Account</p>
-                <p className="text-sm text-gray-500">
-                  Permanently delete your account and all data
-                </p>
-              </div>
-              <button className="px-4 py-2 text-sm font-medium text-red-600 border border-red-300 rounded-lg hover:bg-red-50 transition-colors">
-                Delete Account
-              </button>
-            </div>
-          </div>
-        </div>
+        <DeleteAccount audience="customer" />
       </div>
     </div>
   );
