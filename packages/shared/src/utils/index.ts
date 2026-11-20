@@ -1,4 +1,4 @@
-import type { QuoteRequest, QuoteResponse, MultiStopQuoteRequest, TripProfitability, VehicleType, ServiceLevel, Coordinates, DeliveryStatus } from '../types';
+import type { QuoteRequest, QuoteResponse, QuoteOptions, MultiStopQuoteRequest, TripProfitability, VehicleType, ServiceLevel, Coordinates, DeliveryStatus } from '../types';
 import { VEHICLE_CONFIG, SERVICE_LEVEL_CONFIG, PRICING, DELIVERY_STATUS_CONFIG, MULTI_STOP_PRICING, WAIT_TIME, AFTER_HOURS_SURCHARGE, DRIVER_PAYOUT_TIERS, PLATFORM_COSTS, COMPETITOR_BENCHMARKS } from '../constants';
 
 /**
@@ -41,12 +41,35 @@ export function determineVehicleType(
   return 'car';
 }
 
+const PACIFIC_TIME_PARTS = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles',
+  weekday: 'short',
+  hour: 'numeric',
+  hourCycle: 'h23',
+});
+
+/** Pacific-time hour (0-23) and whether it is Saturday or Sunday. */
+export function pacificTimeInfo(date: Date): { hour: number; isWeekend: boolean } {
+  const parts = PACIFIC_TIME_PARTS.formatToParts(date);
+  const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? '0') % 24;
+  const weekday = parts.find((p) => p.type === 'weekday')?.value ?? '';
+  return { hour, isWeekend: weekday === 'Sat' || weekday === 'Sun' };
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
 /**
- * Calculate delivery quote
+ * Calculate delivery quote.
+ *
+ * Trip price = max(base + miles x per-mile rate, vehicle minimum) + weight surcharge.
+ * Priority/Rush multiply the trip price (shown as rush_surcharge); a weekend
+ * pickup adds 50% of that. Medical (HIPAA), temperature control and after-hours
+ * are flat add-ons and are not multiplied.
  */
 export function calculateQuote(
   request: QuoteRequest,
-  distanceMiles: number
+  distanceMiles: number,
+  options: QuoteOptions = {}
 ): Omit<QuoteResponse, 'quote_id' | 'expires_at'> {
   // Determine vehicle type if not specified
   const vehicleRequired = request.vehicle_required || determineVehicleType(
@@ -61,7 +84,8 @@ export function calculateQuote(
 
   // Base calculations
   const basePrice = vehicleConfig.baseRate;
-  const distancePrice = distanceMiles * vehicleConfig.perMileRate;
+  const distancePrice = round2(distanceMiles * vehicleConfig.perMileRate);
+  const minimumAdjustment = round2(Math.max(0, vehicleConfig.minimumPrice - (basePrice + distancePrice)));
 
   // Weight surcharge (over 50 lbs)
   let weightSurcharge = 0;
@@ -71,32 +95,50 @@ export function calculateQuote(
     weightSurcharge = increments * PRICING.weightSurchargeAmount;
   }
 
-  // Service surcharges
+  const tripPrice = basePrice + distancePrice + minimumAdjustment + weightSurcharge;
+
+  // Speed: Priority 1.3x, Rush 1.8x of the trip price (one charge, not two)
+  const rushSurcharge = round2(tripPrice * (serviceLevelConfig.multiplier - 1));
+
+  // Time of day (Pacific), only when the pickup time is known
+  let afterHoursSurcharge = 0;
+  let weekendSurcharge = 0;
+  if (options.pickupAt) {
+    const { hour, isWeekend } = pacificTimeInfo(options.pickupAt);
+    if (hour >= PRICING.afterHoursStartHour || hour < PRICING.afterHoursEndHour) {
+      afterHoursSurcharge = PRICING.afterHoursSurcharge;
+    }
+    if (isWeekend) {
+      weekendSurcharge = round2((tripPrice + rushSurcharge) * PRICING.weekendSurchargeRate);
+    }
+  }
+
+  // Flat add-ons
   const hipaaSurcharge = request.is_hipaa ? PRICING.hipaaSurcharge : 0;
   const temperatureSurcharge = request.requires_temperature_control ? PRICING.temperatureSurcharge : 0;
-  const rushSurcharge = request.service_level === 'rush' ? (basePrice + distancePrice) * 0.3 : 0;
 
-  // Calculate subtotal
-  const subtotal = basePrice + distancePrice + weightSurcharge + hipaaSurcharge + temperatureSurcharge + rushSurcharge;
+  const totalPrice = round2(
+    tripPrice + rushSurcharge + weekendSurcharge + hipaaSurcharge + temperatureSurcharge + afterHoursSurcharge
+  );
 
-  // Apply service level multiplier
-  const totalPrice = Math.round(subtotal * serviceLevelConfig.multiplier * 100) / 100;
-
-  // Driver payout (75% of base, 100% of tips)
-  const driverPayout = Math.round(totalPrice * PRICING.driverPayoutPercentage * 100) / 100;
+  // Driver payout (PRICING.driverPayoutPercentage of the total; tips are 100%)
+  const driverPayout = round2(totalPrice * PRICING.driverPayoutPercentage);
 
   // Estimated duration (average 24 mph in LA traffic)
   const estimatedDurationMinutes = Math.ceil(distanceMiles * 2.5);
 
   return {
-    distance_miles: Math.round(distanceMiles * 100) / 100,
+    distance_miles: round2(distanceMiles),
     estimated_duration_minutes: estimatedDurationMinutes,
     base_price: basePrice,
-    distance_price: Math.round(distancePrice * 100) / 100,
+    distance_price: distancePrice,
+    minimum_adjustment: minimumAdjustment,
     weight_surcharge: weightSurcharge,
     hipaa_surcharge: hipaaSurcharge,
     temperature_surcharge: temperatureSurcharge,
-    rush_surcharge: Math.round(rushSurcharge * 100) / 100,
+    rush_surcharge: rushSurcharge,
+    after_hours_surcharge: afterHoursSurcharge,
+    weekend_surcharge: weekendSurcharge,
     service_multiplier: serviceLevelConfig.multiplier,
     total_price: totalPrice,
     driver_payout: driverPayout,

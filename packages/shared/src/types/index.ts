@@ -330,12 +330,24 @@ export interface QuoteResponse {
   weight_surcharge: number;
   hipaa_surcharge: number;
   temperature_surcharge: number;
+  /** Added for Priority and Rush (service multiplier above 1.0). */
   rush_surcharge: number;
+  /** Raises a short trip up to the vehicle's minimum price. */
+  minimum_adjustment: number;
+  /** Flat charge for a pickup before 7 AM or from 6 PM Pacific. */
+  after_hours_surcharge: number;
+  /** +50% of the trip price for a Saturday or Sunday pickup (Pacific). */
+  weekend_surcharge: number;
   service_multiplier: number;
   total_price: number;
   driver_payout: number;
   vehicle_required: VehicleType;
   expires_at: string;
+}
+
+export interface QuoteOptions {
+  /** When the pickup happens. Used for after-hours and weekend charges. Omit to skip them. */
+  pickupAt?: Date;
 }
 
 // Job Offer Types (for drivers)

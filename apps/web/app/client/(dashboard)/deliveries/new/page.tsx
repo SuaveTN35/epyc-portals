@@ -829,10 +829,28 @@ export default function NewDeliveryPage() {
                     <span>{formatCurrency(quote.temperature_surcharge)}</span>
                   </div>
                 )}
+                {(quote.minimum_adjustment ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Minimum Trip Charge</span>
+                    <span>{formatCurrency(quote.minimum_adjustment)}</span>
+                  </div>
+                )}
                 {quote.rush_surcharge > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-gray-500">Rush Service</span>
+                    <span className="text-gray-500">Priority / Rush Service</span>
                     <span>{formatCurrency(quote.rush_surcharge)}</span>
+                  </div>
+                )}
+                {(quote.weekend_surcharge ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Weekend</span>
+                    <span>{formatCurrency(quote.weekend_surcharge)}</span>
+                  </div>
+                )}
+                {(quote.after_hours_surcharge ?? 0) > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">After Hours</span>
+                    <span>{formatCurrency(quote.after_hours_surcharge)}</span>
                   </div>
                 )}
               </div>

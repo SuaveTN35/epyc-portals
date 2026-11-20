@@ -3,37 +3,37 @@
 One file per repo. Overwrite it at the end of every work session (Claude Duet or
 Claude Code on the Mac). Do not append or keep old copies.
 
-Last updated: 2026-11-19, Claude Duet
-Branch: main. PR #1 merged 2026-11-19 (merge 0ed710f) and live on epyccs.com.
+Last updated: 2026-11-20, Claude Duet
+Branch for this session: claude/epyc-courier-rates-2026-11 (draft PR, not merged).
+main is at e7e081a (PRs 1 and 3-6 merged). Open drafts: PR 2 (client alerts),
+PR 7 (driver GPS test preview).
 
-## Done (live)
-- Public "Request a Delivery" form (home page #quote and /request-delivery),
-  saved to delivery_requests and emailed to ops, with an acknowledgement to the customer.
-- Working contact form on /contact (contact_messages), replacing the mailto link.
-- Driver signup now asks about cargo van access, experience and availability,
-  and takes an optional resume (PDF or photo).
-- Dispatch: new Requests inbox (/dispatch/requests); Applications page shows
-  the new answers and the resume.
-- Migration: packages/supabase/migrations/20261118000000_public_requests.sql
-- /api/upload creates its Supabase client per request, so a build without the
-  service key no longer fails (it answers 503 instead).
-- Checks: 362 vitest tests pass, tsc clean, next build passes.
+## Done this session (draft PR, waiting on Rico)
+- New customer rates in packages/shared (VEHICLE_CONFIG + calculateQuote),
+  from the 2026-11-20 competitor check (project file epyc/pricing-2026-11-20.md):
+  car $20 + $1.25/mi, min $35; SUV $25 + $1.75/mi, min $45;
+  cargo van/Sprinter $45 + $2.25/mi, min $85. Pickup and box truck unchanged.
+- Priority 1.3x and Rush 1.8x now charged once. Before, Rush added 30% on top
+  of 1.8x (about 2.34x).
+- Medical +$15 and temperature +$25 stay flat (no longer multiplied by rush).
+- New: after hours +$25 (pickup before 7 AM or from 6 PM Pacific) and
+  weekends +50%, by booking time. calculateQuote takes an optional
+  { pickupAt } third argument; without it there are no time charges.
+- New quote fields: minimum_adjustment, after_hours_surcharge,
+  weekend_surcharge. Shown in both quote breakdowns. They have no deliveries
+  columns, so the stored row keeps total_price as the source of truth.
+- Tests: apps/web/lib/pricing.test.ts (21 tests). Full vitest 403 pass; tsc
+  clean for web, client-portal, driver-portal, dispatch. next build not run.
 
-## Open (not checked from Duet; no Supabase or Vercel access)
-1. Supabase: confirm the live handle_new_user() matched the phase0 version
-   (select pg_get_functiondef('public.handle_new_user'::regproc);), then confirm
-   20261118000000_public_requests.sql is applied. If not, /dispatch/requests
-   says so and requests arrive by email only.
-2. Vercel: confirm SUPABASE_SERVICE_ROLE_KEY and RESEND_API_KEY (and
-   EPYC_OPS_EMAIL, EPYC_MAIL_FROM if not default) are set for Production and
-   Preview, and epyccs.com is verified in Resend. Without them the forms do not
-   save or email.
-3. packages/supabase/tests/public_requests.pglite.mjs is written but not run.
+## Open
+1. Rico to review and approve the draft PR before merge.
+2. Not changed (Rico to decide): weight surcharge still applies to vans
+   ($5 per 25 lb over 50 lb); MULTI_STOP_PRICING / calculateMultiStopTrip
+   left as is (no page calls them); pickup truck and box truck prices are
+   below market; holidays are not charged as weekends.
+3. From before: Turnstile secret key and Supabase service key in Vercel, then
+   redeploy and test the public forms.
 
 ## Next step
-Send one delivery request and one contact message on epyccs.com, check both
-reach admin@epyccs.com and show in /dispatch/requests, then mark them spam.
-
-## Also under way
-Driver app plan (GPS tracking, client pickup alerts, package photos) is being
-planned in a separate task. Nothing for it is in this repo yet.
+Rico reads the PR. If approved, merge, let Vercel deploy, and book one test
+quote at 20 miles in a van (expect $90 on a weekday daytime).

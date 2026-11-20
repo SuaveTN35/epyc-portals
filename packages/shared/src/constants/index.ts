@@ -36,35 +36,43 @@ export const SERVICE_LEVEL_CONFIG: Record<ServiceLevel, { label: string; descrip
 } as const;
 
 // Vehicle Type Configuration
+// Rates set 2026-11-20 from a Southern California competitor check
+// (car, SUV and cargo van/Sprinter). minimumPrice is the least a trip costs
+// before speed, weekend and add-on charges. Pickup truck and box truck are
+// unchanged (minimumPrice 0) until Epyc runs those vehicles.
 export const VEHICLE_CONFIG: Record<VehicleType, {
   label: string;
   description: string;
   baseRate: number;
   perMileRate: number;
+  minimumPrice: number;
   maxWeight: number;
   icon: string;
 }> = {
   car: {
     label: 'Car',
     description: 'Small packages, documents',
-    baseRate: 8.00,
-    perMileRate: 1.50,
+    baseRate: 20.00,
+    perMileRate: 1.25,
+    minimumPrice: 35.00,
     maxWeight: 25,
     icon: '🚗'
   },
   suv: {
     label: 'SUV',
     description: 'Medium packages',
-    baseRate: 10.00,
+    baseRate: 25.00,
     perMileRate: 1.75,
+    minimumPrice: 45.00,
     maxWeight: 75,
     icon: '🚙'
   },
   van: {
     label: 'Cargo Van',
     description: 'Large packages, multiple items',
-    baseRate: 15.00,
+    baseRate: 45.00,
     perMileRate: 2.25,
+    minimumPrice: 85.00,
     maxWeight: 250,
     icon: '🚐'
   },
@@ -73,6 +81,7 @@ export const VEHICLE_CONFIG: Record<VehicleType, {
     description: 'Heavy/bulky items',
     baseRate: 25.00,
     perMileRate: 3.00,
+    minimumPrice: 0,
     maxWeight: 500,
     icon: '🛻'
   },
@@ -81,6 +90,7 @@ export const VEHICLE_CONFIG: Record<VehicleType, {
     description: 'Commercial/bulk deliveries',
     baseRate: 40.00,
     perMileRate: 4.00,
+    minimumPrice: 0,
     maxWeight: 2000,
     icon: '🚚'
   },
@@ -129,6 +139,12 @@ export const PRICING = {
   // Special service surcharges
   hipaaSurcharge: 15.00,
   temperatureSurcharge: 25.00,
+
+  // Time-of-day charges (Pacific time, by pickup time)
+  afterHoursSurcharge: 25.00, // flat, pickup before 7 AM or from 6 PM
+  afterHoursStartHour: 18,
+  afterHoursEndHour: 7,
+  weekendSurchargeRate: 0.50, // +50% of the trip price on Saturday and Sunday
 
   // Driver payout percentage (single delivery via app)
   driverPayoutPercentage: 0.60, // 60% of base (tips are 100%) — 1099 owner-operator model

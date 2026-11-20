@@ -84,7 +84,7 @@ export async function POST(request: NextRequest) {
     ...priceSource,
   });
 
-  const quote = quoteForBooking(body, resolved.route.distance_miles);
+  const quote = quoteForBooking(body, resolved.route.distance_miles, new Date());
   const customerQuote = toCustomerQuote(quote);
 
   if (body.quote_only) {
