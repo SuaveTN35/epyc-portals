@@ -13,6 +13,7 @@ import { RouteCard } from '@/components/delivery/RouteCard';
 import { DriverCard } from '@/components/delivery/DriverCard';
 import { ProofOfDeliveryDisplay } from '@/components/delivery/ProofOfDeliveryDisplay';
 import { DeliveryEventsList } from '@/components/delivery/DeliveryEventsList';
+import { LiveDeliveryTracker } from '@/components/delivery/LiveDeliveryTracker';
 import {
   DELIVERY_STATUS_CONFIG,
   VEHICLE_CONFIG,
@@ -170,6 +171,9 @@ export default async function DeliveryDetailPage({ params }: PageProps) {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Column - 2/3 width */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Live tracking: status and driver position, updates on its own */}
+          <LiveDeliveryTracker deliveryId={delivery.id} initialStatus={delivery.status} />
+
           {/* Route Card */}
           <RouteCard
             pickup={{

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import { ACTIVE_DELIVERY_STATUSES, deliveryStatusLabel } from '@/lib/delivery-status';
 import { useGoogleMaps } from '@/lib/hooks/useGoogleMaps';
+import { latestPerDriver } from '@/lib/live-location';
 import {
   Map,
   Truck,
@@ -256,16 +257,17 @@ export default function LiveMapPage() {
 
     if (locations) {
       setDriverLocations(
-        locations.map((loc: any) => ({
+        // One marker per driver: the newest fix (the table keeps every fix).
+        latestPerDriver(locations as any[]).map((loc: any) => ({
           id: loc.id,
           driver_id: loc.driver_id,
           full_name: loc.driver?.profiles?.full_name || 'Unknown',
-          latitude: loc.lat,
-          longitude: loc.lng,
+          latitude: Number(loc.lat),
+          longitude: Number(loc.lng),
           heading: loc.heading,
           speed: loc.speed,
           vehicle_type: loc.driver?.vehicle_type || 'car',
-          current_delivery_id: null,
+          current_delivery_id: loc.delivery_id ?? null,
           current_delivery_tracking: null,
           updated_at: loc.recorded_at,
         }))
