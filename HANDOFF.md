@@ -3,62 +3,125 @@
 One file per repo. Overwrite it at the end of every work session (Claude Duet or
 Claude Code on the Mac). Do not append or keep old copies.
 
-Last updated: 2026-11-18, Claude Duet
-Branches open:
-- claude/public-requests-and-driver-apply (PR #1, open, not merged)
-- claude/client-pickup-delivery-alerts (draft PR, stacked on PR #1, not merged)
+Last updated: 2026-11-22, Claude Duet
 
-## Done: PR #1 (public requests and driver apply)
-- Public "Request a Delivery" form, working contact form, driver screening
-  questions and resume upload, dispatch Requests inbox.
-- Migration: packages/supabase/migrations/20261118000000_public_requests.sql
-- Vercel preview builds. Until SUPABASE_SERVICE_ROLE_KEY and RESEND_API_KEY are
-  set for Preview, the preview forms cannot save or email.
+## Where things stand
+- main: PR #1 (public requests, driver apply) is merged and live. PRs #5 and #6
+  (Turnstile on public forms) are merged. Another Duet thread owns the live
+  site's Turnstile and redeploy; do not touch production env vars or deploys.
+- PR #2 (draft) claude/client-pickup-delivery-alerts -> main. Client email/text
+  alerts at assigned, picked up, delivered, plus the signed /track/<id>/<sig>
+  page. main merged in on Nov 20 (email.ts kept both functions). Its migration
+  packages/supabase/migrations/20261118000100_client_alerts.sql is NOT applied,
+  so alerts return not_ready and send nothing.
+- PR #7 (draft) claude/driver-app-test-run -> claude/client-pickup-delivery-alerts.
+  Driver GPS while on a job, live customer tracking, store readiness,
+  accessibility, and the Capacitor phone app shell. Vercel preview built.
 
-## Done: client alerts branch (step 1 of the driver app plan)
-- Client gets an email, and a text if they turned texts on, when a driver is
-  assigned, when the package is picked up and when it is delivered.
-- Each alert links to a signed public tracking page, /track/<id>/<sig>, with the
-  status steps, pickup item photos, drop-off photo and signature. Medical and
-  HIPAA jobs show no photos. No addresses or names on the page or in texts.
-- Alerts go only to real client accounts on Epyc's own jobs (source direct or
-  dispatch_app). Staff, drivers and partner jobs (curri, walmart_spark, broker,
-  other) get nothing. Dispatch-made jobs use the dispatcher as customer, so
-  they send nothing until a real client is set on the job.
-- Each alert goes out once per job and channel (client_alerts table, unique index).
-- Client Settings: the text switch now saves profiles.sms_opt_in with consent
-  wording. The email and marketing switches saved columns that did not exist;
-  the migration adds them.
-- Migration (not run): packages/supabase/migrations/20261118000100_client_alerts.sql
-- Checks: 387 vitest tests pass, tsc clean, next build passes with placeholder
-  public Supabase env (the PR #1 page /dispatch/requests needs it to prerender).
+## Done in PR #7
+- POST /api/driver/location: signed-in driver only, rate limited, checks the job
+  is theirs and live, writes driver_locations and drivers.current_lat/lng.
+  Uses the existing driver_locations table and RLS; no migration.
+- components/driver/LocationSharing.tsx on the driver job screen: watches GPS
+  while the job is live, sends a fix at most every 10 s (25 m move) or 60 s,
+  keeps the screen awake, shows a visual notice and vibrates on problems.
+- GET /api/client/deliveries/[id]/live: the job's owner only; driver position
+  only while live and under 15 minutes old.
+- components/delivery/LiveDeliveryTracker.tsx on the client job page: polls every
+  15 s while visible, map with driver dot, refreshes the page on status change.
+- /track page refreshes every 30 s until finished. Dispatch Live Map shows the
+  latest fix per driver instead of every fix.
+- Accessibility: axe-core (dev dependency) tests in
+  components/__a11y__/live-tracking.a11y.test.tsx, WCAG 2.0-2.2 A/AA tags,
+  0 violations, plus contrast checks for the colors used.
+- Test script for Rico: docs/driver-app-test-script.md.
+
+## Done in PR #7, second commit (store and accessibility)
+- In-app account deletion: components/settings/DeleteAccount.tsx on client
+  Settings and driver Profile; POST /api/account/delete;
+  lib/server/account-deletion.ts (full delete when no history, otherwise
+  wipe personal details, remove document files and location history, ban the
+  sign-in; staff and open jobs refused). Public /delete-account and
+  /account-deleted pages.
+- Privacy policy: new section 4 Driver Location Data and section 9 Deleting
+  Your Account. Daily purge of location history older than 90 days:
+  /api/cron/purge-locations with apps/web/vercel.json (needs CRON_SECRET).
+- Location explainer on the driver job screen before the phone's prompt.
+- New job offers: on-screen notice, screen reader announcement, vibration.
+- Store icon 1024 and splash 2732 in apps/web/store-assets/.
+- Reviewer demo seed script apps/web/scripts/seed-reviewer-demo.mjs (NOT run).
+- Accessibility fixes site-wide: header menu button, footer social links,
+  driver register pickers, client phone menu (was a dead button, now works),
+  dispatch back and refresh buttons. axe on 15 public pages: 0 issues.
+- docs/accessibility-checklist.md and docs/app-store-readiness.md.
+- Checks: 455 vitest tests pass, tsc clean, next build passes.
+
+## Done in PR #7, third commit (phone app shell, Rico said yes Nov 20)
+- apps/driver-app: Capacitor 8 app "EPYC Driver", id com.epyccs.driver, with
+  ios/ and android/ projects. Loads https://www.epyccs.com/driver/jobs
+  (EPYC_APP_URL points a test build at a preview). Offline page in www/.
+- Plugins: background-geolocation (location with the phone locked; Android
+  foreground service notification, iOS While Using then Always), haptics,
+  app, splash-screen. android.useLegacyBridge on.
+- Permission text: iOS Info.plist (location both kinds, camera, photo
+  library, UIBackgroundModes location); AndroidManifest (fine/coarse
+  location, foreground service location, notifications, camera, vibrate).
+- Icons and splash generated with @capacitor/assets from apps/driver-app/assets.
+- Web bridge apps/web/lib/native-app.ts: LocationSharing uses the native
+  watcher in the app (explainer remembered on the phone, "Open settings" when
+  refused, banner says the phone can be locked); new job offers and location
+  problems use phone haptics; the install-the-website card hides in the app.
+- Location history kept 90 days (Rico confirmed Nov 20).
+- apps/driver-app/README.md has the Mac build steps and Rico's store steps.
+- Checks: 460 vitest tests pass, tsc clean, next build passes.
+
+## Done in PR #7, fourth commit (Nov 22)
+- Dispatch route view: components/dispatch/DeliveryRouteCard.tsx on the
+  dispatch delivery detail page. Reads driver_locations for the job (existing
+  admin/dispatcher RLS, no migration), shows update count, miles shared and
+  last update in text, a map with the trail and pickup/drop-off dots, and a
+  Google Maps link. Polls every 30 s while the job is live.
+- Dead-zone catch-up: LocationSharing keeps up to 15 fixes (one a minute, last
+  15 minutes) when the phone has no signal, shows "No signal right now...",
+  and sends them with their real time when back online
+  (lib/live-location.ts queueOfflineFix). The API accepts recordedAt 30 s to
+  15 min old, saves it as recorded_at, and does not move the driver's current
+  position for a late fix. Lives in memory only (lost if the page reloads).
+- lib/live-location.ts: routeSummary (sorted trail, distance, skips GPS jumps
+  over 50 m/s), milesLabel, queueOfflineFix.
+- Privacy policy section 4: two new lines (dispatch sees each job's route;
+  offline points kept up to 15 minutes on the phone then sent).
+- iOS project set to iPhone only (TARGETED_DEVICE_FAMILY 1), so no iPad
+  screenshots are needed. Landscape still supported.
+- docs/store-listing.md: paste-ready App Store and Play text, review notes
+  template (no password), Apple privacy label and Play Data safety answers,
+  foreground-service declaration text and video shot list, content rating,
+  screenshot sizes and a 6-shot plan.
+- Checks: 472 vitest tests pass, tsc clean, next build passes.
 
 ## Open
-- Nothing sent, no provider account made, no migration run, nothing deployed.
-- packages/supabase/tests/public_requests.pglite.mjs is written but not run.
-- No text opt-in on the booking form yet; clients turn texts on in Settings.
-- The person receiving the package gets no texts yet (only the client who booked).
-- GPS tracking needs the Expo driver app (step 2 of the plan). driver_locations
-  is still never written, so the dispatch map stays empty.
-
-## Before merging (Rico)
-PR #1 first:
-1. Supabase: check the live handle_new_user() still matches the phase0 version,
-   then apply 20261118000000_public_requests.sql.
-2. Vercel: set SUPABASE_SERVICE_ROLE_KEY, RESEND_API_KEY (and EPYC_OPS_EMAIL,
-   EPYC_MAIL_FROM if not default) for Production and Preview; confirm epyccs.com
-   is verified in Resend.
-3. Preview smoke test: one delivery request and one contact message.
-Then the alerts PR:
-4. Apply 20261118000100_client_alerts.sql (after PR #1's migration).
-5. Vercel: set CLIENT_TRACKING_SECRET (openssl rand -base64 32). Without it,
-   alerts link to the client portal instead of the tracking page.
-6. For texts: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_PHONE_NUMBER or
-   TWILIO_MESSAGING_SERVICE_SID, and make sure the A2P 10DLC campaign covers
-   client delivery updates.
-7. Preview test with a test client account and a test driver: assign, pick up,
-   deliver, and check the emails, texts and tracking page.
+- Preview needs SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+  for the map) set for Preview in Vercel before the test works end to end.
+- In a phone browser, location only works while the job screen is open; the
+  phone app shares with the screen locked.
+- The app has not been built in Xcode or Android Studio yet (needs the Mac).
+  Untested on a real phone: background location, camera, haptics.
+- Android may slow WebView requests after about 5 minutes in the background;
+  if the customer map stalls on long drives, move the location send to
+  native HTTP.
+- Push notifications inside the app need Firebase and APNs (not started).
+- Rico: Apple Developer and Play Console accounts (ideally under Epyc),
+  signing (Xcode team, Android upload keystore), store listings (text ready
+  in docs/store-listing.md), screenshots, Play feature graphic, privacy
+  labels and Data safety, Play foreground-service video, set CRON_SECRET in
+  Vercel, run the reviewer demo seed. Nothing submitted to the stores without
+  his yes.
+- Client Settings "Change" email/password and "Enable" two-factor buttons do
+  nothing. Signed-in screens still need a real-browser axe pass with data.
+- Nothing merged, deployed, migrated or sent. No provider, Apple or Google
+  accounts made. Rico registers store accounts himself, ideally under Epyc.
 
 ## Next step
-Rico reviews PR #1 and merges it, then reviews the alerts draft PR. After that:
-step 2 of the plan, the Expo driver app with background GPS.
+Rico runs docs/driver-app-test-script.md on the PR #7 preview. On the Mac:
+cd apps/driver-app, pnpm install, pnpm sync, pnpm open:ios (and
+open:android), run on a phone, and test a delivery with the screen locked.

@@ -36,6 +36,8 @@ import {
 } from '@/lib/proof-flow';
 import { ProofPhotoCapture, type CapturedPhoto } from '@/components/driver/ProofPhotoCapture';
 import { OfflineBanner } from '@/components/driver/OfflineBanner';
+import { LocationSharing } from '@/components/driver/LocationSharing';
+import { isLiveTrackingStatus } from '@/lib/live-location';
 import { requestClientAlert } from '@/lib/sms-client';
 import { CopyButton } from '@/components/driver/CopyButton';
 import { JobDetailsCard } from '@/components/driver/JobDetailsCard';
@@ -307,6 +309,8 @@ export default function DeliveryDetailPage() {
           </div>
         </div>
       </header>
+
+      <LocationSharing deliveryId={delivery.id} active={isLiveTrackingStatus(delivery.status)} />
 
       {/* Map Placeholder */}
       <div className="h-40 bg-gray-300 relative">

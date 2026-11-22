@@ -13,7 +13,7 @@ export default function PrivacyPage() {
       <section className="bg-epyc-gradient text-white py-12 lg:py-16">
         <div className="max-w-7xl mx-auto px-4">
           <h1 className="text-3xl lg:text-4xl font-bold">Privacy Policy</h1>
-          <p className="text-white/80 mt-2">Last updated: February 2026</p>
+          <p className="text-white/80 mt-2">Last updated: November 2026</p>
         </div>
       </section>
 
@@ -59,7 +59,25 @@ export default function PrivacyPage() {
             <li>To comply with legal obligations and enforce our terms</li>
           </ul>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">4. HIPAA Compliance</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">4. Driver Location Data</h2>
+          <p className="text-gray-600 mb-4">
+            When a driver accepts a job, the EPYC driver app and driver portal collect the driver&apos;s precise location
+            from the phone&apos;s GPS. We use it to show the customer and our dispatch team where their delivery is, to
+            estimate arrival times, and to offer drivers nearby jobs.
+          </p>
+          <ul className="list-disc pl-6 text-gray-600 mb-6 space-y-1">
+            <li>Location is collected only while a job is in progress, from acceptance until delivery is complete.</li>
+            <li>When the app is in the background during a job, the phone shows a notification or indicator so the driver always knows location is being shared.</li>
+            <li>No location is collected when the driver is off duty or has no job in progress.</li>
+            <li>The customer sees the driver&apos;s position only for their own delivery, and only while it is in progress.</li>
+            <li>Our dispatch team can see the route a driver&apos;s phone shared for each job, to answer delivery questions.</li>
+            <li>If the phone loses signal during a job, the last few location points are kept on the phone for up to 15 minutes and sent once the signal returns, so the delivery&apos;s route has no gap. They are not kept on the phone after that.</li>
+            <li>We do not sell location data or use it for advertising.</li>
+            <li>Location history is kept for up to 90 days to settle delivery questions and claims, then deleted, unless a claim or legal hold needs it longer.</li>
+            <li>Drivers can turn off location in their phone settings at any time; jobs then cannot be tracked for the customer.</li>
+          </ul>
+
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">5. HIPAA Compliance</h2>
           <p className="text-gray-600 mb-6">
             For medical courier services, EPYC complies with the Health Insurance Portability and Accountability Act (HIPAA).
             We maintain appropriate administrative, physical, and technical safeguards to protect Protected Health Information (PHI)
@@ -67,7 +85,7 @@ export default function PrivacyPage() {
             clients as required.
           </p>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">5. Information Sharing</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">6. Information Sharing</h2>
           <p className="text-gray-600 mb-4">We do not sell your personal information. We may share information with:</p>
           <ul className="list-disc pl-6 text-gray-600 mb-6 space-y-1">
             <li><strong>Service providers:</strong> Payment processors, cloud hosting, and analytics tools that help us operate</li>
@@ -76,14 +94,14 @@ export default function PrivacyPage() {
             <li><strong>Business transfers:</strong> In connection with a merger, acquisition, or sale of assets</li>
           </ul>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">6. Data Security</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">7. Data Security</h2>
           <p className="text-gray-600 mb-6">
             We implement industry-standard security measures to protect your data, including encryption in transit (TLS/SSL),
             secure data storage, access controls, and regular security assessments. However, no method of electronic transmission
             or storage is 100% secure, and we cannot guarantee absolute security.
           </p>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">7. Your Rights</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">8. Your Rights</h2>
           <p className="text-gray-600 mb-4">Depending on your location, you may have the right to:</p>
           <ul className="list-disc pl-6 text-gray-600 mb-6 space-y-1">
             <li>Access, correct, or delete your personal information</li>
@@ -96,25 +114,38 @@ export default function PrivacyPage() {
             contact us at <a href="mailto:admin@epyccs.com" className="text-epyc-primary hover:text-epyc-secondary">admin@epyccs.com</a>.
           </p>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">8. Cookies</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">9. Deleting Your Account</h2>
+          <p className="text-gray-600 mb-6">
+            Customers can delete their account in Settings and drivers in Profile, in the app or on our website. If you
+            cannot sign in, email us from the address on your account. Deleting removes your sign-in and personal
+            details, and for drivers their license, insurance and vehicle documents and location history. Records of
+            completed deliveries, payments and invoices are kept as long as tax, insurance and legal rules require, with
+            your name and contact details removed. Full steps are on our{' '}
+            <Link href="/delete-account" className="text-epyc-primary hover:text-epyc-secondary underline">
+              account deletion page
+            </Link>
+            .
+          </p>
+
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">10. Cookies</h2>
           <p className="text-gray-600 mb-6">
             Our website uses cookies and similar technologies to improve your browsing experience, analyze site traffic,
             and understand where our visitors come from. You can control cookie preferences through your browser settings.
           </p>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">9. Children&apos;s Privacy</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">11. Children&apos;s Privacy</h2>
           <p className="text-gray-600 mb-6">
             Our services are not directed to individuals under 18. We do not knowingly collect personal information
             from children. If you believe we have collected information from a minor, please contact us immediately.
           </p>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">10. Changes to This Policy</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">12. Changes to This Policy</h2>
           <p className="text-gray-600 mb-6">
             We may update this Privacy Policy from time to time. Changes will be posted on this page with an updated
             &quot;Last updated&quot; date. Continued use of our services after changes constitutes acceptance of the updated policy.
           </p>
 
-          <h2 className="text-2xl font-bold text-gray-900 mb-4">11. Contact Us</h2>
+          <h2 className="text-2xl font-bold text-gray-900 mb-4">13. Contact Us</h2>
           <p className="text-gray-600 mb-2">
             If you have questions about this Privacy Policy or our data practices, contact us at:
           </p>

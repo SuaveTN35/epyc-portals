@@ -34,6 +34,7 @@ import {
 import { jobSourceLabel } from '@/lib/new-job';
 import { OfferJobDialog } from '@/components/dispatch/OfferJobDialog';
 import { InsuranceLapsedFlag } from '@/components/dispatch/InsuranceLapsedFlag';
+import { DeliveryRouteCard } from '@/components/dispatch/DeliveryRouteCard';
 import { isActiveJobStatus, loadLapsedInsuranceDrivers } from '@/lib/insurance-alerts';
 import { leftWithLabel, mapsLink } from '@/lib/proof-flow';
 import { openExceptions, resolvedNote } from '@/lib/driver-job';
@@ -410,6 +411,7 @@ export default function DeliveryDetailPage() {
           <Link
             href="/dispatch/deliveries"
             className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+            aria-label="Back to deliveries"
           >
             <ArrowLeft className="h-5 w-5 text-gray-600" />
           </Link>
@@ -670,6 +672,16 @@ export default function DeliveryDetailPage() {
             )}
           </div>
 
+          {/* Route the driver's phone shared for this job */}
+          {delivery.driver && delivery.status !== 'booked' && (
+            <DeliveryRouteCard
+              deliveryId={delivery.id}
+              status={delivery.status}
+              pickup={latLngOrNull(delivery.pickup_lat, delivery.pickup_lng)}
+              dropoff={latLngOrNull(delivery.delivery_lat, delivery.delivery_lng)}
+            />
+          )}
+
           {/* Proof: pickup and drop-off */}
           {pod.pickup && <ProofSection title="Pickup Proof" proof={pod.pickup} />}
           {pod.delivery && <ProofSection title="Drop-off Proof" proof={pod.delivery} />}
@@ -926,6 +938,12 @@ const PHOTO_KIND_LABEL: Record<string, string> = {
   recipient: 'Left with',
   other: 'Other',
 };
+
+function latLngOrNull(lat: number | null | undefined, lng: number | null | undefined) {
+  return typeof lat === 'number' && typeof lng === 'number' && Number.isFinite(lat) && Number.isFinite(lng)
+    ? { lat, lng }
+    : null;
+}
 
 function ProofSection({ title, proof }: { title: string; proof: StageProof }) {
   return (

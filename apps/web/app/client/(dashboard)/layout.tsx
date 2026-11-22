@@ -55,14 +55,14 @@ export default async function ClientDashboardLayout({
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-4 py-6 space-y-1">
+          <nav aria-label="Client portal" className="flex-1 px-4 py-6 space-y-1">
             {navigation.map((item) => (
               <Link
                 key={item.name}
                 href={item.href}
                 className="flex items-center px-4 py-3 text-gray-700 rounded-lg hover:bg-gray-100 hover:text-epyc-primary transition-colors"
               >
-                <item.icon className="h-5 w-5 mr-3" />
+                <item.icon className="h-5 w-5 mr-3" aria-hidden="true" />
                 {item.name}
               </Link>
             ))}
@@ -101,9 +101,34 @@ export default async function ClientDashboardLayout({
             <Image src="/images/logo.png" alt="EPYC" width={40} height={27} />
             <span className="text-lg font-bold text-epyc-dark">Client</span>
           </Link>
-          <button className="p-2 rounded-lg hover:bg-gray-100">
-            <Menu className="h-6 w-6 text-gray-600" />
-          </button>
+          {/* Native disclosure: works with keyboard and screen readers, no script needed. */}
+          <details className="relative">
+            <summary className="list-none flex items-center justify-center min-h-[44px] min-w-[44px] rounded-lg hover:bg-gray-100 cursor-pointer [&::-webkit-details-marker]:hidden">
+              <Menu className="h-6 w-6 text-gray-700" aria-hidden="true" />
+              <span className="sr-only">Menu</span>
+            </summary>
+            <nav aria-label="Client portal" className="absolute right-0 mt-2 w-60 rounded-lg bg-white py-2 shadow-lg ring-1 ring-gray-200">
+              {navigation.map((item) => (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  className="flex items-center min-h-[44px] px-4 text-base text-gray-800 hover:bg-gray-100"
+                >
+                  <item.icon className="h-5 w-5 mr-3" aria-hidden="true" />
+                  {item.name}
+                </Link>
+              ))}
+              <form action="/api/auth/signout" method="post" className="border-t mt-2 pt-2">
+                <button
+                  type="submit"
+                  className="flex w-full items-center min-h-[44px] px-4 text-base text-gray-800 hover:bg-gray-100"
+                >
+                  <LogOut className="h-5 w-5 mr-3" aria-hidden="true" />
+                  Sign out
+                </button>
+              </form>
+            </nav>
+          </details>
         </div>
       </header>
 
