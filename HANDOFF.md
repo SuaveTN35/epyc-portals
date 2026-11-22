@@ -3,7 +3,7 @@
 One file per repo. Overwrite it at the end of every work session (Claude Duet or
 Claude Code on the Mac). Do not append or keep old copies.
 
-Last updated: 2026-11-20, Claude Duet
+Last updated: 2026-11-22, Claude Duet
 
 ## Where things stand
 - main: PR #1 (public requests, driver apply) is merged and live. PRs #5 and #6
@@ -75,6 +75,30 @@ Last updated: 2026-11-20, Claude Duet
 - apps/driver-app/README.md has the Mac build steps and Rico's store steps.
 - Checks: 460 vitest tests pass, tsc clean, next build passes.
 
+## Done in PR #7, fourth commit (Nov 22)
+- Dispatch route view: components/dispatch/DeliveryRouteCard.tsx on the
+  dispatch delivery detail page. Reads driver_locations for the job (existing
+  admin/dispatcher RLS, no migration), shows update count, miles shared and
+  last update in text, a map with the trail and pickup/drop-off dots, and a
+  Google Maps link. Polls every 30 s while the job is live.
+- Dead-zone catch-up: LocationSharing keeps up to 15 fixes (one a minute, last
+  15 minutes) when the phone has no signal, shows "No signal right now...",
+  and sends them with their real time when back online
+  (lib/live-location.ts queueOfflineFix). The API accepts recordedAt 30 s to
+  15 min old, saves it as recorded_at, and does not move the driver's current
+  position for a late fix. Lives in memory only (lost if the page reloads).
+- lib/live-location.ts: routeSummary (sorted trail, distance, skips GPS jumps
+  over 50 m/s), milesLabel, queueOfflineFix.
+- Privacy policy section 4: two new lines (dispatch sees each job's route;
+  offline points kept up to 15 minutes on the phone then sent).
+- iOS project set to iPhone only (TARGETED_DEVICE_FAMILY 1), so no iPad
+  screenshots are needed. Landscape still supported.
+- docs/store-listing.md: paste-ready App Store and Play text, review notes
+  template (no password), Apple privacy label and Play Data safety answers,
+  foreground-service declaration text and video shot list, content rating,
+  screenshot sizes and a 6-shot plan.
+- Checks: 472 vitest tests pass, tsc clean, next build passes.
+
 ## Open
 - Preview needs SUPABASE_SERVICE_ROLE_KEY (and NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
   for the map) set for Preview in Vercel before the test works end to end.
@@ -87,7 +111,8 @@ Last updated: 2026-11-20, Claude Duet
   native HTTP.
 - Push notifications inside the app need Firebase and APNs (not started).
 - Rico: Apple Developer and Play Console accounts (ideally under Epyc),
-  signing (Xcode team, Android upload keystore), store listings, privacy
+  signing (Xcode team, Android upload keystore), store listings (text ready
+  in docs/store-listing.md), screenshots, Play feature graphic, privacy
   labels and Data safety, Play foreground-service video, set CRON_SECRET in
   Vercel, run the reviewer demo seed. Nothing submitted to the stores without
   his yes.

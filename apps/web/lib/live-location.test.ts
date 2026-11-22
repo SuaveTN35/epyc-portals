@@ -59,7 +59,7 @@ describe('parseLocationBody', () => {
     const r = parseLocationBody({ deliveryId: ID.toUpperCase(), lat: 34.05223456789, lng: -118.24371234, speed: 12.345, heading: 359.7 });
     expect(r).toEqual({
       ok: true,
-      value: { deliveryId: ID, lat: 34.052235, lng: -118.243712, speed: 12.35, heading: 0 },
+      value: { deliveryId: ID, lat: 34.052235, lng: -118.243712, speed: 12.35, heading: 0, recordedAt: null },
     });
   });
   it('allows a fix with no job', () => {
@@ -121,5 +121,84 @@ describe('retentionCutoff', () => {
   it('is 90 days before now', async () => {
     const { retentionCutoff } = await import('./live-location');
     expect(retentionCutoff(Date.UTC(2026, 10, 20))).toBe('2026-08-22T00:00:00.000Z');
+  });
+});
+
+describe('late fixes sent after a dead zone', () => {
+  const NOW = Date.parse('2026-11-22T10:00:00Z');
+  const base = { deliveryId: ID, lat: 34.05, lng: -118.24 };
+
+  it('keeps the real time of a fix taken a few minutes ago', async () => {
+    const { parseLocationBody: parse } = await import('./live-location');
+    const r = parse({ ...base, recordedAt: '2026-11-22T09:55:00Z' }, NOW);
+    expect(r.ok && r.value.recordedAt).toBe('2026-11-22T09:55:00.000Z');
+  });
+
+  it('ignores a fresh, future, too old or bad time', async () => {
+    const { parseLocationBody: parse } = await import('./live-location');
+    for (const recordedAt of ['2026-11-22T09:59:50Z', '2026-11-22T10:05:00Z', '2026-11-22T09:30:00Z', 'soon', 5]) {
+      const r = parse({ ...base, recordedAt }, NOW);
+      expect(r.ok && r.value.recordedAt).toBeNull();
+    }
+  });
+});
+
+describe('routeSummary and milesLabel', () => {
+  it('sorts points, sums distance and skips bad rows', async () => {
+    const { routeSummary } = await import('./live-location');
+    const s = routeSummary([
+      { lat: 34.01, lng: -118.24, recorded_at: '2026-11-22T10:02:00Z' },
+      { lat: '34.00', lng: '-118.24', recorded_at: '2026-11-22T10:00:00Z' },
+      { lat: 'x', lng: -118.24, recorded_at: '2026-11-22T10:01:00Z' },
+      { lat: 34.02, lng: -118.24, recorded_at: null },
+    ]);
+    expect(s.points.map((p) => p.lat)).toEqual([34, 34.01]);
+    expect(s.distanceMeters).toBeGreaterThan(1100);
+    expect(s.distanceMeters).toBeLessThan(1120);
+    expect(s.startedAt).toBe('2026-11-22T10:00:00Z');
+    expect(s.lastAt).toBe('2026-11-22T10:02:00Z');
+  });
+
+  it('does not count a jump faster than a car can drive', async () => {
+    const { routeSummary } = await import('./live-location');
+    const s = routeSummary([
+      { lat: 34, lng: -118, recorded_at: '2026-11-22T10:00:00Z' },
+      { lat: 35, lng: -118, recorded_at: '2026-11-22T10:00:10Z' },
+    ]);
+    expect(s.distanceMeters).toBe(0);
+  });
+
+  it('is empty with no rows', async () => {
+    const { routeSummary } = await import('./live-location');
+    expect(routeSummary([])).toEqual({ points: [], distanceMeters: 0, startedAt: null, lastAt: null });
+  });
+
+  it('labels miles', async () => {
+    const { milesLabel } = await import('./live-location');
+    expect(milesLabel(0)).toBe('0.0 miles');
+    expect(milesLabel(1609.344 * 2.34)).toBe('2.3 miles');
+    expect(milesLabel(1609.344 * 12.6)).toBe('13 miles');
+  });
+});
+
+describe('queueOfflineFix', () => {
+  const T = Date.parse('2026-11-22T10:00:00Z');
+  const fix = (atMs: number) => ({ lat: 34, lng: -118, speed: null, heading: null, atMs });
+
+  it('keeps one fix a minute', async () => {
+    const { queueOfflineFix } = await import('./live-location');
+    let q = queueOfflineFix([], fix(T), T);
+    q = queueOfflineFix(q, fix(T + 20_000), T + 20_000);
+    q = queueOfflineFix(q, fix(T + 61_000), T + 61_000);
+    expect(q.map((f) => f.atMs)).toEqual([T, T + 61_000]);
+  });
+
+  it('drops fixes older than 15 minutes and keeps at most 15', async () => {
+    const { queueOfflineFix, OFFLINE_QUEUE_MAX } = await import('./live-location');
+    let q: ReturnType<typeof queueOfflineFix> = [];
+    for (let i = 0; i < 30; i++) q = queueOfflineFix(q, fix(T + i * 60_000), T + i * 60_000);
+    expect(q.length).toBeLessThanOrEqual(OFFLINE_QUEUE_MAX);
+    expect(q[q.length - 1].atMs).toBe(T + 29 * 60_000);
+    expect(q[0].atMs).toBeGreaterThanOrEqual(T + 14 * 60_000);
   });
 });

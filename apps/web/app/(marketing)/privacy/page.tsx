@@ -70,6 +70,8 @@ export default function PrivacyPage() {
             <li>When the app is in the background during a job, the phone shows a notification or indicator so the driver always knows location is being shared.</li>
             <li>No location is collected when the driver is off duty or has no job in progress.</li>
             <li>The customer sees the driver&apos;s position only for their own delivery, and only while it is in progress.</li>
+            <li>Our dispatch team can see the route a driver&apos;s phone shared for each job, to answer delivery questions.</li>
+            <li>If the phone loses signal during a job, the last few location points are kept on the phone for up to 15 minutes and sent once the signal returns, so the delivery&apos;s route has no gap. They are not kept on the phone after that.</li>
             <li>We do not sell location data or use it for advertising.</li>
             <li>Location history is kept for up to 90 days to settle delivery questions and claims, then deleted, unless a claim or legal hold needs it longer.</li>
             <li>Drivers can turn off location in their phone settings at any time; jobs then cannot be tracked for the customer.</li>

@@ -7,6 +7,18 @@ import { render, screen, waitFor, act } from '@testing-library/react';
 import axe from 'axe-core';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const routeRows: { rows: Array<{ lat: number; lng: number; recorded_at: string }> } = { rows: [] };
+vi.mock('@/lib/supabase/client', () => ({
+  createClient: () => {
+    const q = {
+      select: () => q,
+      eq: () => q,
+      order: () => q,
+      limit: async () => ({ data: routeRows.rows, error: null }),
+    };
+    return { from: () => q };
+  },
+}));
 vi.mock('@/lib/hooks/useGoogleMaps', () => ({
   useGoogleMaps: () => ({ isLoaded: false, loadError: null, google: null }),
 }));
@@ -14,6 +26,7 @@ vi.mock('@/lib/hooks/useGoogleMaps', () => ({
 import { LocationSharing } from '@/components/driver/LocationSharing';
 import { LiveDeliveryTracker } from '@/components/delivery/LiveDeliveryTracker';
 import { DeleteAccount } from '@/components/settings/DeleteAccount';
+import { DeliveryRouteCard } from '@/components/dispatch/DeliveryRouteCard';
 
 const JOB = '3f2b6c1e-8a4d-4f2a-9b7c-1d2e3f4a5b6c';
 
@@ -211,4 +224,62 @@ describe('color contrast (WCAG 1.4.3 AA)', () => {
       expect(contrast(fg, bg)).toBeGreaterThanOrEqual(4.5);
     });
   }
+});
+
+describe('Driver location with no signal', () => {
+  it('keeps fixes while offline and sends them with their real time when back online', async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    global.fetch = vi.fn(async (_u: unknown, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+    let online = false;
+    Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => online });
+    try {
+      const { container } = render(<LocationSharing deliveryId={JOB} active />);
+      await waitFor(() => expect(onPosition).not.toBeNull());
+      await act(async () => {
+        onPosition?.({ coords: { latitude: 34.05, longitude: -118.24, accuracy: 10, speed: null, heading: null } } as GeolocationPosition);
+      });
+      const notice = await screen.findByRole('status');
+      await waitFor(() => expect(notice.textContent).toMatch(/No signal right now/));
+      expect(bodies).toEqual([]);
+      expect(await axeViolations(container)).toEqual([]);
+
+      online = true;
+      await act(async () => {
+        window.dispatchEvent(new Event('online'));
+      });
+      await waitFor(() => expect(bodies.length).toBe(1));
+      expect(bodies[0]).toMatchObject({ deliveryId: JOB, lat: 34.05, lng: -118.24 });
+      expect(typeof bodies[0].recordedAt).toBe('string');
+    } finally {
+      Object.defineProperty(navigator, 'onLine', { configurable: true, get: () => true });
+    }
+  });
+});
+
+describe('Dispatch driver route card', () => {
+  it('lists updates, distance and last update in text, with no axe violations', async () => {
+    const now = Date.now();
+    routeRows.rows = [
+      { lat: 34.0, lng: -118.24, recorded_at: new Date(now - 4 * 60_000).toISOString() },
+      { lat: 34.01, lng: -118.24, recorded_at: new Date(now - 2 * 60_000).toISOString() },
+    ];
+    const { container } = render(
+      <DeliveryRouteCard deliveryId={JOB} status="picked_up" pickup={{ lat: 34, lng: -118.25 }} dropoff={{ lat: 34.02, lng: -118.24 }} />
+    );
+    const region = await screen.findByRole('region', { name: 'Driver route' });
+    await waitFor(() => expect(region.textContent).toMatch(/Location updates2/));
+    expect(region.textContent).toMatch(/0\.7 miles/);
+    expect(screen.getByRole('img').getAttribute('aria-label')).toMatch(/2 location updates/);
+    expect(screen.getByRole('link', { name: /Open the driver's last location in Google Maps/ })).toBeTruthy();
+    expect(await axeViolations(container)).toEqual([]);
+  });
+
+  it('says plainly when no location was shared', async () => {
+    routeRows.rows = [];
+    render(<DeliveryRouteCard deliveryId={JOB} status="delivered" pickup={null} dropoff={null} />);
+    expect(await screen.findByText(/did not share a location for this job/)).toBeTruthy();
+  });
 });

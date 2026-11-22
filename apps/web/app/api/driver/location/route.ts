@@ -4,7 +4,7 @@ import { getCallerDriver } from '@/lib/server/driver-session';
 import { isLiveTrackingStatus, parseLocationBody } from '@/lib/live-location';
 
 /**
- * POST /api/driver/location   { deliveryId?, lat, lng, accuracy?, speed?, heading? }
+ * POST /api/driver/location   { deliveryId?, lat, lng, accuracy?, speed?, heading?, recordedAt? }
  *
  * The driver's phone sends its position here while a job is active (the
  * driver job screen does this on its own, throttled to one fix every 10 to 60
@@ -57,11 +57,16 @@ export async function POST(request: NextRequest) {
     lng: fix.lng,
     speed: fix.speed,
     heading: fix.heading,
+    // A fix sent late after the phone was offline keeps its real time.
+    ...(fix.recordedAt ? { recorded_at: fix.recordedAt } : {}),
   });
   if (error) {
     console.error('[driver-location] insert failed:', error.message);
     return NextResponse.json({ error: 'Could not save location' }, { status: 500 });
   }
+
+  // A late fix is history, not where the driver is now.
+  if (fix.recordedAt) return NextResponse.json({ ok: true });
 
   const { error: driverError } = await admin
     .from('drivers')

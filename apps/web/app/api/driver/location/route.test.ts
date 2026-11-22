@@ -73,6 +73,14 @@ describe('POST /api/driver/location', () => {
     expect(state.driverUpdates).toEqual([{ current_lat: 34.05, current_lng: -118.24 }]);
   });
 
+  it('saves a late fix at its real time without moving the driver pin', async () => {
+    const at = new Date(Date.now() - 5 * 60_000).toISOString();
+    const res = await POST(req({ deliveryId: JOB, lat: 34.05, lng: -118.24, recordedAt: at }));
+    expect(await res.json()).toEqual({ ok: true });
+    expect(state.inserted[0].recorded_at).toBe(at);
+    expect(state.driverUpdates).toEqual([]);
+  });
+
   it('ignores a driver id in the body', async () => {
     await POST(req({ deliveryId: JOB, lat: 34.05, lng: -118.24, driver_id: 'someone-else' }));
     expect(state.inserted[0].driver_id).toBe(`drv-${n}`);

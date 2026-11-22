@@ -9,7 +9,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { MapPin } from 'lucide-react';
-import { locationAgeLabel, shouldSendLocation, type LatLng } from '@/lib/live-location';
+import {
+  locationAgeLabel,
+  queueOfflineFix,
+  shouldSendLocation,
+  type LatLng,
+  type PendingFix,
+} from '@/lib/live-location';
 import {
   hapticAlert,
   hasBackgroundLocation,
@@ -22,7 +28,7 @@ import {
 // phone, since the browser permission check is not available there.
 const NATIVE_CONSENT_KEY = 'epyc-location-explainer-accepted';
 
-type SharingState = 'starting' | 'on' | 'denied' | 'unavailable' | 'error' | 'stopped';
+type SharingState = 'starting' | 'on' | 'offline' | 'denied' | 'unavailable' | 'error' | 'stopped';
 
 interface WakeLockSentinelLike {
   release: () => Promise<void>;
@@ -35,6 +41,11 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
   const lastSent = useRef<(LatLng & { atMs: number }) | null>(null);
   const sending = useRef(false);
   const stopped = useRef(false);
+  // Fixes taken with no signal (a dead zone, a parking garage). They are sent
+  // with their real time once the phone is back online, so dispatch's route
+  // has no gap.
+  const pending = useRef<PendingFix[]>([]);
+  const flushing = useRef(false);
   // Shown before the phone's own location prompt (Google Play "prominent
   // disclosure", App Store 5.1.1): null while checking, false until the driver
   // taps Turn on location, true once allowed or already granted.
@@ -89,25 +100,73 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
     stopped.current = false;
     setState('starting');
 
+    const post = (body: Record<string, unknown>) =>
+      fetch('/api/driver/location', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        keepalive: true,
+        body: JSON.stringify({ deliveryId, ...body }),
+      });
+
+    const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+
+    const keepForLater = (fix: NativeFix, now: number) => {
+      pending.current = queueOfflineFix(
+        pending.current,
+        { lat: fix.lat, lng: fix.lng, speed: fix.speed, heading: fix.heading, atMs: now },
+        now
+      );
+      setState('offline');
+    };
+
+    // Sends the fixes kept while offline, oldest first, each with its real time.
+    const flushPending = async () => {
+      if (flushing.current || stopped.current || pending.current.length === 0) return;
+      flushing.current = true;
+      try {
+        while (pending.current.length > 0 && !stopped.current) {
+          const f = pending.current[0];
+          const res = await post({
+            lat: f.lat,
+            lng: f.lng,
+            speed: f.speed,
+            heading: f.heading,
+            recordedAt: new Date(f.atMs).toISOString(),
+          });
+          const data = (await res.json().catch(() => ({}))) as { ok?: boolean; stop?: boolean };
+          if (data.stop) {
+            stopped.current = true;
+            pending.current = [];
+            setState('stopped');
+            return;
+          }
+          if (res.status === 429 || res.status >= 500) return; // try again on the next fix
+          pending.current = pending.current.slice(1); // sent, or refused as bad: either way done with it
+        }
+      } catch {
+        // Still offline: keep the rest for later.
+      } finally {
+        flushing.current = false;
+      }
+    };
+
     const send = async (fix: NativeFix) => {
       if (stopped.current || sending.current) return;
       const next = { lat: fix.lat, lng: fix.lng };
       const now = Date.now();
+      if (isOffline()) {
+        keepForLater(fix, now);
+        return;
+      }
       if (!shouldSendLocation(lastSent.current, next, now)) return;
       sending.current = true;
       try {
-        const res = await fetch('/api/driver/location', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          keepalive: true,
-          body: JSON.stringify({
-            deliveryId,
-            lat: next.lat,
-            lng: next.lng,
-            accuracy: fix.accuracy,
-            speed: fix.speed,
-            heading: fix.heading,
-          }),
+        const res = await post({
+          lat: next.lat,
+          lng: next.lng,
+          accuracy: fix.accuracy,
+          speed: fix.speed,
+          heading: fix.heading,
         });
         const data = (await res.json().catch(() => ({}))) as { ok?: boolean; stop?: boolean };
         if (data.stop) {
@@ -119,16 +178,20 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
           lastSent.current = { ...next, atMs: now };
           setLastSentIso(new Date(now).toISOString());
           setState('on');
+          void flushPending();
         } else if (res.status !== 429) {
           setState('error');
         }
       } catch {
-        // Offline: keep watching; the next fix tries again.
-        setState((s) => (s === 'on' ? 'on' : 'error'));
+        // No signal: keep this fix and send it with its real time later.
+        keepForLater(fix, now);
       } finally {
         sending.current = false;
       }
     };
+
+    const onOnline = () => void flushPending();
+    window.addEventListener('online', onOnline);
 
     if (useNative) {
       // Phone app: the native watcher keeps running with the screen locked.
@@ -147,6 +210,7 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
       return () => {
         ended = true;
         stopped.current = true;
+        window.removeEventListener('online', onOnline);
         stopNative?.();
       };
     }
@@ -182,6 +246,7 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
 
     return () => {
       stopped.current = true;
+      window.removeEventListener('online', onOnline);
       navigator.geolocation.clearWatch(watchId);
       document.removeEventListener('visibilitychange', onVisible);
       void wakeLock?.release().catch(() => undefined);
@@ -241,7 +306,7 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
   const tone =
     state === 'on'
       ? 'bg-green-50 border-green-200 text-green-800'
-      : state === 'starting'
+      : state === 'starting' || state === 'offline'
         ? 'bg-gray-50 border-gray-200 text-gray-700'
         : 'bg-amber-50 border-amber-200 text-amber-900';
   const message =
@@ -251,6 +316,8 @@ export function LocationSharing({ deliveryId, active }: { deliveryId: string; ac
         }`
       : state === 'starting'
         ? 'Turning on location sharing...'
+        : state === 'offline'
+          ? 'No signal right now. Your location is saved on this phone and sends when you are back online. Keep driving.'
         : state === 'denied'
           ? native
             ? 'Location is off for the Epyc Driver app. Turn it on in your phone settings so the customer can follow the delivery.'
